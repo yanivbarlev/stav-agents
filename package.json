@@ -1,0 +1,34 @@
+{
+  "name": "stav-agents",
+  "version": "1.0.0",
+  "description": "FamilySearch and genealogy site extraction agents",
+  "main": "index.js",
+  "scripts": {
+    "setup": "node playwright-auth-setup.js",
+    "setup:clean": "rm -rf chrome-profile-copy && node playwright-auth-setup.js",
+    "test:auth": "node playwright-auth-setup.js",
+    "test:urls": "node test-auth-urls.js",
+    "install:playwright": "npx playwright install chrome",
+    "build": "tsc",
+    "test:familysearch": "ts-node src/tools/familysearch.test.ts",
+    "debug:familysearch": "ts-node src/tools/familysearch-debug.ts"
+  },
+  "keywords": [
+    "genealogy",
+    "familysearch",
+    "ancestry",
+    "playwright"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "^1.48.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.0"
+  }
+}

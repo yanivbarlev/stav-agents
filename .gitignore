@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Chrome Profile Copy (contains sensitive cookies/sessions)
+chrome-profile-copy/
+
+# Playwright
+.playwright/
+playwright-report/
+playwright-state.json
+
+# Environment files
+.env
+.env.local
+
+# Output data
+output/
+data/
+*.db
+*.sqlite
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
