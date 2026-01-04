@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FamilySearch Hebrew Search</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>FamilySearch</h1>
+      <p class="subtitle">Hebrew Name Search</p>
+    </header>
+
+    <div id="status-bar" class="status-bar hidden">
+      <span id="status-text"></span>
+    </div>
+
+    <form id="search-form">
+      <div class="form-group">
+        <label for="firstName">First Name (Hebrew)</label>
+        <input
+          type="text"
+          id="firstName"
+          name="firstName"
+          placeholder="e.g., קיטלין"
+          required
+        >
+      </div>
+
+      <div class="form-group">
+        <label for="lastName">Last Name (Hebrew)</label>
+        <input
+          type="text"
+          id="lastName"
+          name="lastName"
+          placeholder="e.g., סמית"
+          required
+        >
+      </div>
+
+      <div class="form-row">
+        <div class="form-group half">
+          <label for="birthYear">Birth Year</label>
+          <input
+            type="number"
+            id="birthYear"
+            name="birthYear"
+            placeholder="1945"
+            min="1500"
+            max="2025"
+          >
+        </div>
+        <div class="form-group half">
+          <label for="birthYearRange">+/- Years</label>
+          <input
+            type="number"
+            id="birthYearRange"
+            name="birthYearRange"
+            value="10"
+            min="0"
+            max="50"
+          >
+        </div>
+      </div>
+
+      <!-- Collapsible Additional Criteria -->
+      <div class="expandable-section">
+        <button type="button" class="expand-btn" id="expand-additional">
+          <span>▶ Additional Search Criteria (Optional)</span>
+        </button>
+        <div class="expandable-content hidden" id="additional-fields">
+
+          <div class="form-row">
+            <div class="form-group half">
+              <label for="deathYear">Death Year</label>
+              <input
+                type="number"
+                id="deathYear"
+                name="deathYear"
+                placeholder="2010"
+                min="1500"
+                max="2025"
+              >
+            </div>
+            <div class="form-group half">
+              <label for="deathYearRange">+/- Years</label>
+              <input
+                type="number"
+                id="deathYearRange"
+                name="deathYearRange"
+                value="5"
+                min="0"
+                max="50"
+              >
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="birthPlace">Birth Place</label>
+            <input
+              type="text"
+              id="birthPlace"
+              name="birthPlace"
+              placeholder="Jerusalem, Israel"
+            >
+          </div>
+
+          <div class="form-group">
+            <label for="deathPlace">Death Place</label>
+            <input
+              type="text"
+              id="deathPlace"
+              name="deathPlace"
+              placeholder="Tel Aviv, Israel"
+            >
+          </div>
+
+          <div class="form-group">
+            <label for="anyPlace">Any Place (general location)</label>
+            <input
+              type="text"
+              id="anyPlace"
+              name="anyPlace"
+              placeholder="Israel"
+            >
+          </div>
+
+          <div class="form-group">
+            <label for="spouseName">Spouse Name (English or Hebrew)</label>
+            <input
+              type="text"
+              id="spouseName"
+              name="spouseName"
+              placeholder="David / דוד"
+            >
+          </div>
+
+          <div class="form-group">
+            <label for="fatherName">Father's Name (English or Hebrew)</label>
+            <input
+              type="text"
+              id="fatherName"
+              name="fatherName"
+              placeholder="Abraham / אברהם"
+            >
+          </div>
+
+          <div class="form-group">
+            <label for="motherName">Mother's Name (English or Hebrew)</label>
+            <input
+              type="text"
+              id="motherName"
+              name="motherName"
+              placeholder="Sarah / שרה"
+            >
+          </div>
+
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="maxResults">Max Results per Search</label>
+        <input
+          type="number"
+          id="maxResults"
+          name="maxResults"
+          value="20"
+          min="1"
+          max="100"
+        >
+      </div>
+
+      <button type="submit" id="generate-btn" class="btn-primary">
+        <span class="btn-text">Generate Name Variants</span>
+        <span class="btn-loading hidden">Generating...</span>
+      </button>
+    </form>
+
+    <!-- Variant Selection Section -->
+    <div id="variant-selection" class="variant-selection hidden">
+      <h3>Select Variants to Search</h3>
+      <p class="hint">Check the variants you want to search. Ordered by plausibility.</p>
+
+      <div id="variant-lists"></div>
+
+      <div class="search-summary">
+        <strong>Total searches:</strong> <span id="total-searches">0</span>
+      </div>
+
+      <button id="execute-search-btn" class="btn-primary">
+        <span class="btn-text">Search Selected Combinations</span>
+        <span class="btn-loading hidden">Processing...</span>
+      </button>
+    </div>
+
+    <div class="divider"></div>
+
+    <button id="extract-btn" class="btn-secondary-full">
+      <span class="btn-text">Extract Results from Current Page</span>
+      <span class="btn-loading hidden">Extracting...</span>
+    </button>
+
+    <div id="variants-section" class="variants-section hidden">
+      <h3>Generated Name Variants</h3>
+      <div id="first-name-variants" class="variant-group">
+        <strong>First Name:</strong>
+        <div class="variant-chips" id="first-chips"></div>
+      </div>
+      <div id="last-name-variants" class="variant-group">
+        <strong>Last Name:</strong>
+        <div class="variant-chips" id="last-chips"></div>
+      </div>
+    </div>
+
+    <div id="results-section" class="results-section hidden">
+      <h3>Results <span id="results-count"></span></h3>
+      <div id="results-list"></div>
+    </div>
+
+    <div id="error-section" class="error-section hidden">
+      <p id="error-text"></p>
+      <button id="retry-btn" class="btn-secondary">Retry</button>
+    </div>
+
+    <footer>
+      <p>Make sure you're logged into FamilySearch</p>
+      <a href="https://www.familysearch.org" target="_blank">Open FamilySearch</a>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

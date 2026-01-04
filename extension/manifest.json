@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "FamilySearch Hebrew Name Search",
+  "version": "1.0.0",
+  "description": "Search FamilySearch with Hebrew names - generates English variants automatically",
+
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting",
+    "sidePanel"
+  ],
+
+  "host_permissions": [
+    "https://www.familysearch.org/*",
+    "http://localhost:3000/*"
+  ],
+
+  "action": {
+    "default_title": "FamilySearch Hebrew Search"
+  },
+
+  "side_panel": {
+    "default_path": "popup/popup.html"
+  },
+
+  "background": {
+    "service_worker": "background/background.js",
+    "type": "module"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://www.familysearch.org/*"],
+      "js": ["content/familysearch.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
