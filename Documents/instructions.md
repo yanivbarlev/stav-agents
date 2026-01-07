@@ -175,3 +175,115 @@ SIBLING_OF should be bidirectional
 SPOUSE_OF is undirected (either direction works)
 Every Person must link to at least one Source
 Use confidence scores on SOURCED_FROM when data quality varies
+
+
+IMPORTANT: Hebrew Name Handling
+Input names are in Hebrew and must be transliterated to English with multiple possible spellings.
+Example:
+
+Hebrew input: קיטלין
+Possible English variants: Kathleen, Kaitlyn, Caitlin, Katelyn, Kaitlin, Caitlyn, Kaytlin, etc.
+
+Required approach:
+
+Add generateNameVariants function:
+
+typescriptinterface NameInput {
+  hebrewName: string;        // Original Hebrew: "קיטלין"
+  knownEnglishSpelling?: string;  // If we have a hint
+}
+
+interface NameVariants {
+  hebrew: string;
+  variants: string[];        // ["Kathleen", "Kaitlyn", "Caitlin", ...]
+  primaryVariant: string;    // Best guess for initial search
+}
+
+Variant generation strategy:
+
+Use Claude/LLM to generate 5-10 likely English spellings from Hebrew
+Consider phonetic patterns (ק→K/C/Q, י→I/Y/E, etc.)
+Include common American spellings of the name
+
+
+Search strategy:
+
+Search FamilySearch for top 3-5 variants
+Merge and deduplicate results by fsId
+Store which variant matched
+
+
+Update Neo4j schema - add to Person node:
+
+cypher(:Person {
+  // ... existing fields ...
+  hebrewName: string,        // Original Hebrew input
+  searchedVariants: [string], // Which spellings we searched
+  matchedVariant: string     // Which spelling found this person
+})
+
+Scoring boost:
+
+Candidates matching multiple spelling variants = higher confidence
+Candidates with family members also matching Hebrew inputs = higher confidence
+
+
+## Deduplication Strategy (Critical)
+
+FamilySearch often returns multiple records for the same person from different sources (census records, death records, etc.). These have **different FamilySearch IDs** but represent the same individual.
+
+### Client-Side Deduplication (Extension)
+
+The Chrome extension deduplicates search results before display using two methods:
+
+1. **FamilySearch ID (`fsId`)** - Same exact record appearing in multiple search tabs
+2. **Name + Birth Year + Death Year** - Different records for same person
+
+```javascript
+// Generate unique key for name-based dedup
+const nameKey = `${name.toLowerCase()}|${birthYear}|${deathYear}`;
+```
+
+Example: Two records "Larry S Lev" with different fsIds but same birth/death years will be merged.
+
+### Server-Side Deduplication (Neo4j)
+
+The PersonService uses pre-save deduplication with two-pass matching:
+
+1. **First Pass: Exact Name Matches** - Lower threshold (70%) for records with identical `primaryName`
+2. **Second Pass: Similar Names** - Higher threshold (75%) for fuzzy name matches
+
+```typescript
+// Priority: exact name matches first, then similar names
+const EXACT_NAME_THRESHOLD = 0.70;
+const PRESAVE_DEDUP_THRESHOLD = 0.75;
+```
+
+**Key Insight**: Missing birth dates can lower confidence scores significantly (77.8% vs 84.9%). Exact name matching compensates for this by using a lower threshold.
+
+### Why Two Levels of Deduplication?
+
+| Level | Where | Deduplicates By | Purpose |
+|-------|-------|-----------------|---------|
+| Extension | Before display | name + birth/death years | Clean UI, fewer results to review |
+| Server | Before save | name similarity + dates | Prevent duplicate Person nodes in Neo4j |
+
+Both are necessary because:
+- Extension handles FamilySearch's multiple records per person
+- Server handles variant searches (e.g., "Larry" vs "Lari") finding same person
+
+
+Also Update the SearchParams Interface
+typescriptinterface SearchParams {
+  // Change from:
+  // firstName: string;
+  // lastName: string;
+  
+  // To:
+  firstNameHebrew?: string;
+  lastNameHebrew?: string;
+  firstNameEnglish?: string;   // If already known
+  lastNameEnglish?: string;    // If already known
+  
+  // ... rest stays the same
+}

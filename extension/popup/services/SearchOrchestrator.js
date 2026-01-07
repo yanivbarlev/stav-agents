@@ -138,7 +138,8 @@ export class SearchOrchestrator {
    */
   async _extractFromAllTabs(openedTabs, statusCallback) {
     const allPersons = [];
-    const seenIds = new Set();
+    const seenIds = new Set(); // FamilySearch IDs
+    const seenNames = new Map(); // name -> person index for name-based dedup
     let successCount = 0;
 
     for (let i = 0; i < openedTabs.length; i++) {
@@ -167,26 +168,41 @@ export class SearchOrchestrator {
         if (tabResults && tabResults.persons) {
           // Add variant info and deduplicate
           for (const person of tabResults.persons) {
-            if (!seenIds.has(person.fsId)) {
-              // New person - add variant info
-              person.matchedVariant = `${firstName} ${lastName}`;
-              person.originalFirstName = person.originalFirstName || firstName;
-              person.originalLastName = person.originalLastName || lastName;
-              allPersons.push(person);
-              seenIds.add(person.fsId);
-            } else {
-              // Duplicate - track additional variant that matched
+            // First check by FamilySearch ID (same exact record)
+            if (seenIds.has(person.fsId)) {
+              // Duplicate by fsId - track additional variant
               const existing = allPersons.find(p => p.fsId === person.fsId);
               if (existing) {
-                if (!existing.searchedVariants) {
-                  existing.searchedVariants = [existing.matchedVariant];
-                }
-                const variantString = `${firstName} ${lastName}`;
-                if (!existing.searchedVariants.includes(variantString)) {
-                  existing.searchedVariants.push(variantString);
-                }
+                this._addVariantToExisting(existing, firstName, lastName);
               }
+              continue;
             }
+
+            // Then check by name + birth/death dates (different records for same person)
+            const nameKey = this._generateNameKey(person);
+            if (seenNames.has(nameKey)) {
+              // Duplicate by name - merge into existing
+              const existingIndex = seenNames.get(nameKey);
+              const existing = allPersons[existingIndex];
+              if (existing) {
+                this._addVariantToExisting(existing, firstName, lastName);
+                // Also track the additional fsId
+                if (!existing.mergedFsIds) {
+                  existing.mergedFsIds = [existing.fsId];
+                }
+                existing.mergedFsIds.push(person.fsId);
+              }
+              seenIds.add(person.fsId); // Mark this fsId as seen too
+              continue;
+            }
+
+            // New person - add variant info
+            person.matchedVariant = `${firstName} ${lastName}`;
+            person.originalFirstName = person.originalFirstName || firstName;
+            person.originalLastName = person.originalLastName || lastName;
+            allPersons.push(person);
+            seenIds.add(person.fsId);
+            seenNames.set(nameKey, allPersons.length - 1);
           }
           successCount++;
         }
@@ -209,8 +225,54 @@ export class SearchOrchestrator {
     console.log(
       `[SearchOrchestrator] Successfully extracted from ${successCount}/${openedTabs.length} tabs`
     );
+    console.log(
+      `[SearchOrchestrator] ${allPersons.length} unique persons after name-based deduplication`
+    );
 
     return allPersons;
+  }
+
+  /**
+   * Generate a unique key for name-based deduplication
+   * Uses name + birth year + death year to identify same person across different records
+   * @private
+   * @param {Object} person - Person object
+   * @returns {string} Unique key for deduplication
+   */
+  _generateNameKey(person) {
+    const name = (person.fullName || '').toLowerCase().trim();
+    const birthYear = this._extractYear(person.birthDate);
+    const deathYear = this._extractYear(person.deathDate);
+    return `${name}|${birthYear}|${deathYear}`;
+  }
+
+  /**
+   * Extract year from a date string
+   * @private
+   * @param {string} dateStr - Date string (e.g., "1952", "10 May 1952", "31 July 2019")
+   * @returns {string} Year or empty string
+   */
+  _extractYear(dateStr) {
+    if (!dateStr) return '';
+    const match = dateStr.match(/\d{4}/);
+    return match ? match[0] : '';
+  }
+
+  /**
+   * Add variant info to an existing person (for duplicates)
+   * @private
+   * @param {Object} existing - Existing person object
+   * @param {string} firstName - First name variant
+   * @param {string} lastName - Last name variant
+   */
+  _addVariantToExisting(existing, firstName, lastName) {
+    if (!existing.searchedVariants) {
+      existing.searchedVariants = [existing.matchedVariant];
+    }
+    const variantString = `${firstName} ${lastName}`;
+    if (!existing.searchedVariants.includes(variantString)) {
+      existing.searchedVariants.push(variantString);
+    }
   }
 
   /**
