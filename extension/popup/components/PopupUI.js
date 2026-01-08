@@ -16,6 +16,45 @@ export class PopupUI {
     this.resultsList = document.getElementById('results-list');
     this.errorSection = document.getElementById('error-section');
     this.errorText = document.getElementById('error-text');
+
+    // API reference for save operations
+    this.api = null;
+    this.state = null;
+
+    // Hover popup management
+    this.detailPopup = null;
+    this.hoverTimeout = null;
+    this.activeResultItem = null;
+    this._createDetailPopup();
+  }
+
+  /**
+   * Create the detail popup element
+   * @private
+   */
+  _createDetailPopup() {
+    this.detailPopup = document.createElement('div');
+    this.detailPopup.className = 'person-detail-popup';
+    this.detailPopup.id = 'person-detail-popup';
+    document.body.appendChild(this.detailPopup);
+
+    // Hide popup when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!this.detailPopup.contains(e.target) &&
+          !e.target.closest('.result-item')) {
+        this._hideDetailPopup();
+      }
+    });
+  }
+
+  /**
+   * Set API reference for save operations
+   * @param {BackendAPI} api - Backend API instance
+   * @param {SearchState} state - Search state instance
+   */
+  setAPI(api, state) {
+    this.api = api;
+    this.state = state;
   }
 
   /**
@@ -156,26 +195,606 @@ export class PopupUI {
       return;
     }
 
-    results.forEach(person => {
+    results.forEach((person, index) => {
       const item = document.createElement('div');
       item.className = 'result-item';
+      item.id = `result-${index}`;
 
       const birthInfo = person.birthDate ? `Born: ${person.birthDate}` : '';
       const birthPlace = person.birthPlace ? ` in ${person.birthPlace}` : '';
       const deathInfo = person.deathDate ? ` | Died: ${person.deathDate}` : '';
 
+      // Count family members
+      const parentsCount = person.parents?.length || 0;
+      const siblingsCount = person.siblings?.length || 0;
+      const spousesCount = person.spouses?.length || 0;
+      const childrenCount = person.children?.length || 0;
+      const totalFamily = parentsCount + siblingsCount + spousesCount + childrenCount;
+
+      // Generate source tag based on sourceTag field
+      const sourceTagClass = person.sourceTag === 'FS+MH' ? 'both' :
+                             person.sourceTag === 'MH' ? 'mh' : 'fs';
+      const sourceTagText = person.sourceTag || 'FS';
+
+      // Generate ID display - show primary ID or first from sources array
+      const primaryId = person.fsId || person.mhId ||
+                       (person.sources && person.sources[0]?.id) || 'Unknown';
+
+      // Generate source links
+      const sourceLinks = this._generateResultSourceLinks(person);
+
       item.innerHTML = `
-        <div class="result-name">${person.fullName}</div>
-        <div class="result-id">ID: ${person.fsId}</div>
+        <div class="result-header">
+          <div class="result-name">
+            ${person.fullName}
+            <span class="source-tag ${sourceTagClass}">${sourceTagText}</span>
+          </div>
+          <button class="btn-save" data-index="${index}" title="Save to database">
+            <span class="save-icon">+</span> Save
+          </button>
+        </div>
+        <div class="result-id">ID: ${primaryId}</div>
         <div class="result-details">
           ${birthInfo}${birthPlace}${deathInfo}
         </div>
         ${person.matchedVariant ? `<div class="result-details">Matched: ${person.matchedVariant}</div>` : ''}
-        <a href="${person.sourceUrl}" target="_blank" class="result-link">View on FamilySearch</a>
+        ${totalFamily > 0 ? `<div class="result-family">Family: ${parentsCount} parents, ${siblingsCount} siblings, ${spousesCount} spouses, ${childrenCount} children</div>` : ''}
+        <div class="result-actions">
+          ${sourceLinks}
+        </div>
+        <div class="save-status hidden" id="save-status-${index}"></div>
       `;
+
+      // Add click handler for save button
+      const saveBtn = item.querySelector('.btn-save');
+      saveBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // Prevent popup from showing
+        this.handleSavePerson(person, index);
+      });
+
+      // Add hover handlers for detail popup
+      item.addEventListener('mouseenter', () => this._onResultHover(person, item));
+      item.addEventListener('mouseleave', () => this._onResultLeave());
 
       this.resultsList.appendChild(item);
     });
+  }
+
+  /**
+   * Handle mouse entering a result item
+   * @private
+   * @param {Object} person - Person data
+   * @param {HTMLElement} item - The result item element
+   */
+  _onResultHover(person, item) {
+    // Clear any pending hide timeout
+    if (this.hoverTimeout) {
+      clearTimeout(this.hoverTimeout);
+      this.hoverTimeout = null;
+    }
+
+    // Show popup after short delay
+    this.hoverTimeout = setTimeout(() => {
+      this._showDetailPopup(person, item);
+    }, 300);
+  }
+
+  /**
+   * Handle mouse leaving a result item
+   * @private
+   */
+  _onResultLeave() {
+    // Clear show timeout if still pending
+    if (this.hoverTimeout) {
+      clearTimeout(this.hoverTimeout);
+      this.hoverTimeout = null;
+    }
+
+    // Delay hiding to allow mouse to move to popup
+    this.hoverTimeout = setTimeout(() => {
+      if (!this.detailPopup.matches(':hover')) {
+        this._hideDetailPopup();
+      }
+    }, 200);
+  }
+
+  /**
+   * Show the detail popup for a person
+   * @private
+   * @param {Object} person - Person data
+   * @param {HTMLElement} item - The result item element
+   */
+  _showDetailPopup(person, item) {
+    // Mark active item
+    if (this.activeResultItem) {
+      this.activeResultItem.classList.remove('hover-active');
+    }
+    this.activeResultItem = item;
+    item.classList.add('hover-active');
+
+    // Generate popup content
+    this.detailPopup.innerHTML = this._generatePopupContent(person);
+
+    // Position popup
+    const itemRect = item.getBoundingClientRect();
+    const popupHeight = 400; // max-height from CSS
+
+    // Position above or below item depending on space
+    if (itemRect.top > popupHeight) {
+      this.detailPopup.style.top = `${itemRect.top - popupHeight - 10}px`;
+    } else {
+      this.detailPopup.style.top = `${itemRect.bottom + 10}px`;
+    }
+
+    // Show popup
+    this.detailPopup.classList.add('visible');
+
+    // Add hover listener to popup itself
+    this.detailPopup.addEventListener('mouseleave', () => {
+      this._hideDetailPopup();
+    });
+  }
+
+  /**
+   * Hide the detail popup
+   * @private
+   */
+  _hideDetailPopup() {
+    this.detailPopup.classList.remove('visible');
+    if (this.activeResultItem) {
+      this.activeResultItem.classList.remove('hover-active');
+      this.activeResultItem = null;
+    }
+  }
+
+  /**
+   * Generate HTML content for the detail popup
+   * Organized for heir search purposes:
+   * 1. Identity - Who is this person?
+   * 2. Family - Who are their relatives? (CRITICAL for heir search)
+   * 3. Source - Where did this data come from?
+   * 4. Search - How did we find them?
+   * @private
+   * @param {Object} person - Person data
+   * @returns {string} HTML string
+   */
+  _generatePopupContent(person) {
+    const lifespan = this._formatLifespan(person);
+
+    return `
+      <!-- Header: Name and Lifespan -->
+      <div class="popup-header">
+        <div class="popup-name">${person.fullName || 'Unknown'}</div>
+        <div class="popup-lifespan">${lifespan}</div>
+      </div>
+
+      <!-- Section 1: Identity Information -->
+      <div class="popup-section identity">
+        <div class="popup-section-title">Identity</div>
+        ${this._generateIdentityRows(person)}
+      </div>
+
+      <!-- Section 2: Family Relationships (Most important for heir search) -->
+      <div class="popup-section family">
+        <div class="popup-section-title">Family Relationships</div>
+        ${this._generateFamilySection(person)}
+      </div>
+
+      <!-- Section 3: Source Information -->
+      <div class="popup-section source">
+        <div class="popup-section-title">Source</div>
+        ${this._generateSourceRows(person)}
+      </div>
+
+      <!-- Section 4: Search Metadata -->
+      <div class="popup-section search">
+        <div class="popup-section-title">Search Info</div>
+        ${this._generateSearchRows(person)}
+      </div>
+
+      <div class="popup-hint">Hover to keep open • Click outside to close</div>
+    `;
+  }
+
+  /**
+   * Format lifespan string
+   * @private
+   * @param {Object} person - Person data
+   * @returns {string} Formatted lifespan
+   */
+  _formatLifespan(person) {
+    const birthYear = this._extractYear(person.birthDate);
+    const deathYear = this._extractYear(person.deathDate);
+
+    if (birthYear && deathYear) {
+      const age = parseInt(deathYear) - parseInt(birthYear);
+      return `<span class="year">${birthYear}</span> - <span class="year">${deathYear}</span> (${age} years)`;
+    } else if (birthYear) {
+      return `Born <span class="year">${birthYear}</span>`;
+    } else if (deathYear) {
+      return `Died <span class="year">${deathYear}</span>`;
+    }
+    return 'Dates unknown';
+  }
+
+  /**
+   * Extract year from date string
+   * @private
+   * @param {string} dateStr - Date string
+   * @returns {string} Year or empty string
+   */
+  _extractYear(dateStr) {
+    if (!dateStr) return '';
+    const match = dateStr.match(/\d{4}/);
+    return match ? match[0] : '';
+  }
+
+  /**
+   * Generate identity information rows
+   * @private
+   * @param {Object} person - Person data
+   * @returns {string} HTML string
+   */
+  _generateIdentityRows(person) {
+    let html = '';
+
+    if (person.birthDate || person.birthPlace) {
+      html += `
+        <div class="popup-row">
+          <span class="popup-label">Birth:</span>
+          <span class="popup-value">${person.birthDate || ''} ${person.birthPlace ? `in ${person.birthPlace}` : ''}</span>
+        </div>
+      `;
+    }
+
+    if (person.deathDate || person.deathPlace) {
+      html += `
+        <div class="popup-row">
+          <span class="popup-label">Death:</span>
+          <span class="popup-value">${person.deathDate || ''} ${person.deathPlace ? `in ${person.deathPlace}` : ''}</span>
+        </div>
+      `;
+    }
+
+    if (person.sex) {
+      html += `
+        <div class="popup-row">
+          <span class="popup-label">Sex:</span>
+          <span class="popup-value">${person.sex}</span>
+        </div>
+      `;
+    }
+
+    if (!html) {
+      html = '<div class="no-data">No identity details available</div>';
+    }
+
+    return html;
+  }
+
+  /**
+   * Generate family relationships section
+   * This is the MOST IMPORTANT section for heir search
+   * @private
+   * @param {Object} person - Person data
+   * @returns {string} HTML string
+   */
+  _generateFamilySection(person) {
+    const parents = person.parents || [];
+    const siblings = person.siblings || [];
+    const spouses = person.spouses || [];
+    const children = person.children || [];
+
+    const totalFamily = parents.length + siblings.length + spouses.length + children.length;
+
+    if (totalFamily === 0) {
+      return '<div class="no-data">No family relationships found in this record</div>';
+    }
+
+    let html = '';
+
+    // Parents - Important for establishing lineage
+    if (parents.length > 0) {
+      html += `
+        <div class="family-group">
+          <div class="family-group-label">
+            Parents <span class="family-count">${parents.length}</span>
+          </div>
+          <ul class="family-member-list">
+            ${parents.map(p => `
+              <li class="family-member parent">
+                ${typeof p === 'string' ? p : (p.name || 'Unknown')}
+              </li>
+            `).join('')}
+          </ul>
+        </div>
+      `;
+    }
+
+    // Spouses - Important for identifying married heirs
+    if (spouses.length > 0) {
+      html += `
+        <div class="family-group">
+          <div class="family-group-label">
+            Spouses <span class="family-count">${spouses.length}</span>
+          </div>
+          <ul class="family-member-list">
+            ${spouses.map(s => `
+              <li class="family-member spouse">
+                ${typeof s === 'string' ? s : (s.name || 'Unknown')}
+              </li>
+            `).join('')}
+          </ul>
+        </div>
+      `;
+    }
+
+    // Children - CRITICAL for heir search (direct descendants)
+    if (children.length > 0) {
+      html += `
+        <div class="family-group">
+          <div class="family-group-label">
+            Children <span class="family-count">${children.length}</span>
+          </div>
+          <ul class="family-member-list">
+            ${children.map(c => `
+              <li class="family-member child">
+                ${typeof c === 'string' ? c : (c.name || 'Unknown')}
+              </li>
+            `).join('')}
+          </ul>
+        </div>
+      `;
+    }
+
+    // Siblings - Important for collateral heirs
+    if (siblings.length > 0) {
+      html += `
+        <div class="family-group">
+          <div class="family-group-label">
+            Siblings <span class="family-count">${siblings.length}</span>
+          </div>
+          <ul class="family-member-list">
+            ${siblings.map(s => `
+              <li class="family-member sibling">
+                ${typeof s === 'string' ? s : (s.name || 'Unknown')}
+              </li>
+            `).join('')}
+          </ul>
+        </div>
+      `;
+    }
+
+    return html;
+  }
+
+  /**
+   * Generate source information rows
+   * @private
+   * @param {Object} person - Person data
+   * @returns {string} HTML string
+   */
+  _generateSourceRows(person) {
+    let html = '';
+
+    // Handle multi-source persons (new format with sources array)
+    if (person.sources && person.sources.length > 0) {
+      // Show source tag
+      const sourceTagClass = person.sourceTag === 'FS+MH' ? 'both' :
+                             person.sourceTag === 'MH' ? 'mh' : 'fs';
+      html += `
+        <div class="popup-row">
+          <span class="popup-label">Sources:</span>
+          <span class="popup-value"><span class="source-tag ${sourceTagClass}">${person.sourceTag || 'FS'}</span></span>
+        </div>
+      `;
+
+      // Show each source with its ID and link
+      for (const source of person.sources) {
+        const sourceLabel = source.name === 'FamilySearch' ? 'FS ID' : 'MH ID';
+        html += `
+          <div class="popup-row">
+            <span class="popup-label">${sourceLabel}:</span>
+            <span class="popup-value">
+              <span class="fs-id">${source.id || 'Unknown'}</span>
+              ${source.url ? `<a href="${source.url}" target="_blank" class="popup-link">View</a>` : ''}
+            </span>
+          </div>
+        `;
+
+        if (source.collection) {
+          html += `
+            <div class="popup-row">
+              <span class="popup-label">Collection:</span>
+              <span class="popup-value">${source.collection}</span>
+            </div>
+          `;
+        }
+      }
+    } else {
+      // Legacy format - single source (FamilySearch)
+      html += `
+        <div class="popup-row">
+          <span class="popup-label">FS ID:</span>
+          <span class="popup-value"><span class="fs-id">${person.fsId || 'Unknown'}</span></span>
+        </div>
+      `;
+
+      if (person.collectionName) {
+        html += `
+          <div class="popup-row">
+            <span class="popup-label">Collection:</span>
+            <span class="popup-value">${person.collectionName}</span>
+          </div>
+        `;
+      }
+    }
+
+    if (person.extractedAt) {
+      const date = new Date(person.extractedAt);
+      html += `
+        <div class="popup-row">
+          <span class="popup-label">Extracted:</span>
+          <span class="popup-value">${date.toLocaleDateString()} ${date.toLocaleTimeString()}</span>
+        </div>
+      `;
+    }
+
+    return html;
+  }
+
+  /**
+   * Generate source links for result item
+   * @private
+   * @param {Object} person - Person data
+   * @returns {string} HTML string with source links
+   */
+  _generateResultSourceLinks(person) {
+    // Handle multi-source persons
+    if (person.sources && person.sources.length > 0) {
+      return person.sources.map(source => {
+        const linkClass = source.name === 'FamilySearch' ? 'fs-link' : 'mh-link';
+        const linkLabel = source.name === 'FamilySearch' ? 'FamilySearch' : 'MyHeritage';
+        return `<a href="${source.url}" target="_blank" class="result-link ${linkClass}">View on ${linkLabel}</a>`;
+      }).join(' ');
+    }
+
+    // Legacy format - single FamilySearch source
+    return `<a href="${person.sourceUrl}" target="_blank" class="result-link">View on FamilySearch</a>`;
+  }
+
+  /**
+   * Generate search metadata rows
+   * @private
+   * @param {Object} person - Person data
+   * @returns {string} HTML string
+   */
+  _generateSearchRows(person) {
+    let html = '';
+
+    if (person.matchedVariant) {
+      html += `
+        <div class="popup-row">
+          <span class="popup-label">Matched:</span>
+          <span class="popup-value">
+            <span class="variant-chip-small matched">${person.matchedVariant}</span>
+          </span>
+        </div>
+      `;
+    }
+
+    if (person.searchedVariants && person.searchedVariants.length > 0) {
+      const otherVariants = person.searchedVariants.filter(v => v !== person.matchedVariant);
+      if (otherVariants.length > 0) {
+        html += `
+          <div class="popup-row">
+            <span class="popup-label">Also tried:</span>
+            <span class="popup-value">
+              ${otherVariants.map(v => `<span class="variant-chip-small">${v}</span>`).join('')}
+            </span>
+          </div>
+        `;
+      }
+    }
+
+    if (person.mergedFsIds && person.mergedFsIds.length > 1) {
+      html += `
+        <div class="popup-row">
+          <span class="popup-label">Merged IDs:</span>
+          <span class="popup-value">${person.mergedFsIds.length} records combined</span>
+        </div>
+      `;
+    }
+
+    if (!html) {
+      html = '<div class="no-data">No search metadata</div>';
+    }
+
+    return html;
+  }
+
+  /**
+   * Handle saving a single person to the database
+   * @param {Object} person - Person object to save
+   * @param {number} index - Index in results list
+   */
+  async handleSavePerson(person, index) {
+    if (!this.api) {
+      this.showStatus('API not configured', 'error');
+      return;
+    }
+
+    const saveBtn = document.querySelector(`#result-${index} .btn-save`);
+    const saveStatus = document.getElementById(`save-status-${index}`);
+
+    // Disable button and show loading
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<span class="save-icon">⏳</span> Saving...';
+
+    try {
+      // Prepare person data with extractedAt timestamp
+      const personToSave = {
+        ...person,
+        extractedAt: person.extractedAt || new Date().toISOString()
+      };
+
+      // Call API to save
+      const result = await this.api.savePersons([personToSave], this.state?.params || {});
+
+      if (result.success) {
+        // Success - update button
+        saveBtn.innerHTML = '<span class="save-icon">✓</span> Saved';
+        saveBtn.classList.add('saved');
+
+        // Show family info in status
+        const savedPerson = result.persons?.[0];
+        if (savedPerson) {
+          saveStatus.innerHTML = this.formatSaveConfirmation(result, person);
+          saveStatus.classList.remove('hidden');
+        }
+
+        this.showStatus(`Saved ${person.fullName} to database`, 'success');
+        setTimeout(() => this.hideStatus(), 3000);
+      } else {
+        throw new Error(result.error || 'Failed to save');
+      }
+    } catch (error) {
+      console.error('[PopupUI] Save error:', error);
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<span class="save-icon">✗</span> Retry';
+      saveBtn.classList.add('error');
+      this.showStatus(`Failed to save: ${error.message}`, 'error');
+    }
+  }
+
+  /**
+   * Format save confirmation message with family details
+   * @param {Object} result - API result
+   * @param {Object} person - Original person data
+   * @returns {string} HTML string
+   */
+  formatSaveConfirmation(result, person) {
+    let html = `<div class="save-confirmation">`;
+    html += `<strong>✓ Saved to Neo4j</strong>`;
+
+    // Show relationship counts
+    const relationships = [];
+    if (person.parents?.length) relationships.push(`${person.parents.length} parent(s)`);
+    if (person.siblings?.length) relationships.push(`${person.siblings.length} sibling(s)`);
+    if (person.spouses?.length) relationships.push(`${person.spouses.length} spouse(s)`);
+    if (person.children?.length) relationships.push(`${person.children.length} child(ren)`);
+
+    if (relationships.length > 0) {
+      html += `<div class="family-saved">Relationships: ${relationships.join(', ')}</div>`;
+    }
+
+    // Show match info if any
+    if (result.matched > 0) {
+      html += `<div class="matches-found">⚡ ${result.matched} potential duplicate(s) found</div>`;
+    }
+
+    html += `</div>`;
+    return html;
   }
 
   /**
@@ -185,5 +804,12 @@ export class PopupUI {
     this.resultsList.innerHTML = '';
     this.resultsCount.textContent = '';
     this.resultsSection.classList.add('hidden');
+
+    // Clean up popup state
+    this._hideDetailPopup();
+    if (this.hoverTimeout) {
+      clearTimeout(this.hoverTimeout);
+      this.hoverTimeout = null;
+    }
   }
 }

@@ -1,9 +1,9 @@
 /**
  * SearchOrchestrator - Orchestrates the multi-tab search and extraction process
- * Core refactoring: Extracts the massive performSearch() logic into organized methods
+ * Supports multiple sources: FamilySearch + MyHeritage with cross-source deduplication
  */
 
-import { buildSearchUrlPermutations } from '../utils/urlBuilder.js';
+import { buildMultiSourceSearchUrls, SOURCES } from '../utils/urlBuilder.js';
 import { ensureContentScriptReady, ensureContentScriptReadyFast } from '../utils/contentScriptInjector.js';
 
 export class SearchOrchestrator {
@@ -14,14 +14,20 @@ export class SearchOrchestrator {
     this.chromeAPI = chromeAPI;
   }
 
+  // Re-export SOURCES for convenience
+  static get SOURCES() {
+    return SOURCES;
+  }
+
   /**
    * Execute the complete search workflow
    * @param {Object} selectedVariants - Selected variants for each field
    * @param {Object} searchParams - Search parameters
    * @param {Function} [statusCallback] - Optional callback for status updates
+   * @param {string[]} [enabledSources] - Which sources to search (default: both FS and MH)
    * @returns {Promise<Array>} Extracted and deduplicated persons
    */
-  async executeSearch(selectedVariants, searchParams, statusCallback) {
+  async executeSearch(selectedVariants, searchParams, statusCallback, enabledSources = [SOURCES.FAMILYSEARCH, SOURCES.MYHERITAGE]) {
     // Validate required fields
     if (!selectedVariants.firstName || selectedVariants.firstName.length === 0) {
       throw new Error('Please select at least one first name variant');
@@ -32,10 +38,11 @@ export class SearchOrchestrator {
 
     this._updateStatus(statusCallback, 'Building search combinations...', 'info');
 
-    // Build all search URL permutations
-    const searchUrls = buildSearchUrlPermutations(selectedVariants, searchParams);
+    // Build all search URL permutations for all enabled sources
+    const searchUrls = buildMultiSourceSearchUrls(selectedVariants, searchParams, enabledSources);
 
-    this._updateStatus(statusCallback, `Opening ${searchUrls.length} search tabs...`, 'info');
+    const sourceLabel = enabledSources.length > 1 ? 'FamilySearch + MyHeritage' : enabledSources[0];
+    this._updateStatus(statusCallback, `Opening ${searchUrls.length} search tabs (${sourceLabel})...`, 'info');
 
     // Open all search tabs
     const openedTabs = await this._openSearchTabs(searchUrls);
@@ -50,36 +57,54 @@ export class SearchOrchestrator {
 
     this._updateStatus(statusCallback, 'Extracting results from all tabs...', 'info');
 
-    // Extract from all tabs
+    // Extract from all tabs (basic info from search results)
     const allPersons = await this._extractFromAllTabs(openedTabs, statusCallback);
-
-    this._updateStatus(
-      statusCallback,
-      `Extracted ${allPersons.length} unique results from ${openedTabs.length} tabs`,
-      'success'
-    );
 
     if (allPersons.length === 0) {
       throw new Error('No results found across all searches');
     }
+
+    this._updateStatus(
+      statusCallback,
+      `Found ${allPersons.length} unique results. Now fetching family details...`,
+      'info'
+    );
+
+    // Enrich with family details from detail pages
+    await this._enrichWithFamilyDetails(allPersons, statusCallback);
+
+    this._updateStatus(
+      statusCallback,
+      `Extracted ${allPersons.length} results with family details from ${openedTabs.length} tabs`,
+      'success'
+    );
 
     return allPersons;
   }
 
   /**
    * Extract from a single tab (for manual extraction)
+   * Supports both FamilySearch and MyHeritage pages
    * @param {chrome.tabs.Tab} tab - Tab to extract from
+   * @param {boolean} [withDetails=true] - Whether to fetch family details from detail pages
+   * @param {Function} [statusCallback] - Optional callback for status updates
    * @returns {Promise<Array>} Extracted persons
    */
-  async extractFromTab(tab) {
-    if (!tab.url || !tab.url.includes('familysearch.org')) {
-      throw new Error('Please navigate to a FamilySearch search results page first');
+  async extractFromTab(tab, withDetails = true, statusCallback = null) {
+    // Detect which source based on URL
+    let source = SOURCES.FAMILYSEARCH;
+    if (tab.url?.includes('myheritage.com') || tab.url?.includes('myheritage.co.il')) {
+      source = SOURCES.MYHERITAGE;
+    } else if (!tab.url?.includes('familysearch.org')) {
+      throw new Error('Please navigate to a FamilySearch or MyHeritage search results page first');
     }
+
+    this._updateStatus(statusCallback, `Extracting from ${source}...`, 'info');
 
     // Ensure content script is ready (fast version for manual extraction)
     await ensureContentScriptReadyFast(tab.id);
 
-    // Extract results
+    // Extract basic results from search page
     const tabResults = await this.chromeAPI.sendMessageToTab(tab.id, {
       action: 'extractResults'
     });
@@ -88,14 +113,117 @@ export class SearchOrchestrator {
       throw new Error(tabResults.error);
     }
 
-    return tabResults.persons || [];
+    const persons = tabResults.persons || [];
+
+    // Add source info to each person
+    for (const person of persons) {
+      const sourceId = source === SOURCES.MYHERITAGE ? person.mhId : person.fsId;
+      person.source = source;
+      person.sources = [{
+        name: source,
+        id: sourceId,
+        url: person.sourceUrl,
+        collection: person.collectionName || '',
+        extractedAt: person.extractedAt || new Date().toISOString()
+      }];
+      person.sourceTag = source === SOURCES.MYHERITAGE ? 'MH' : 'FS';
+    }
+
+    // If withDetails is true, enrich each person with family data from detail pages
+    if (withDetails && persons.length > 0) {
+      this._updateStatus(statusCallback, `Extracting family details from ${persons.length} records...`, 'info');
+      await this._enrichWithFamilyDetails(persons, statusCallback);
+    }
+
+    return persons;
+  }
+
+  /**
+   * Enrich persons with family data by opening their detail pages
+   * @private
+   * @param {Array} persons - Array of person objects with sourceUrl
+   * @param {Function} [statusCallback] - Optional callback for status updates
+   */
+  async _enrichWithFamilyDetails(persons, statusCallback) {
+    for (let i = 0; i < persons.length; i++) {
+      const person = persons[i];
+
+      if (!person.sourceUrl) {
+        console.log(`[SearchOrchestrator] No sourceUrl for person ${i + 1}, skipping detail extraction`);
+        continue;
+      }
+
+      try {
+        this._updateStatus(
+          statusCallback,
+          `Fetching family details ${i + 1}/${persons.length}: ${person.fullName}...`,
+          'info'
+        );
+
+        // Open detail page in background tab
+        const detailTab = await this.chromeAPI.createTab(person.sourceUrl, false);
+
+        // Wait for tab to load
+        await this.chromeAPI.waitForTabsLoad([detailTab.id], 15000);
+
+        // Extra wait for content to render (FamilySearch is an SPA)
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Ensure content script is ready
+        await ensureContentScriptReady(detailTab.id);
+
+        // Extract family data from detail page
+        const familyResult = await this.chromeAPI.sendMessageToTab(detailTab.id, {
+          action: 'extractFamilyFromDetailPage'
+        });
+
+        if (familyResult && familyResult.familyData) {
+          const familyData = familyResult.familyData;
+
+          // Merge family data into person object
+          person.parents = familyData.parents || [];
+          person.spouses = familyData.spouses || [];
+          person.children = familyData.children || [];
+          person.siblings = familyData.siblings || [];
+
+          // Update dates/places if we got better data from detail page
+          if (familyData.birthDate && !person.birthDate) {
+            person.birthDate = familyData.birthDate;
+          }
+          if (familyData.birthPlace && !person.birthPlace) {
+            person.birthPlace = familyData.birthPlace;
+          }
+          if (familyData.deathDate && !person.deathDate) {
+            person.deathDate = familyData.deathDate;
+          }
+          if (familyData.deathPlace && !person.deathPlace) {
+            person.deathPlace = familyData.deathPlace;
+          }
+          if (familyData.sex) {
+            person.sex = familyData.sex;
+          }
+
+          console.log(`[SearchOrchestrator] Enriched ${person.fullName}: ${person.parents.length} parents, ${person.spouses.length} spouses, ${person.children.length} children, ${person.siblings.length} siblings`);
+        }
+
+        // Close detail tab
+        await this.chromeAPI.removeTab(detailTab.id);
+
+        // Small delay between detail page fetches to be nice to the server
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+      } catch (error) {
+        console.error(`[SearchOrchestrator] Failed to extract family details for ${person.fullName}:`, error);
+        // Continue with other persons even if one fails
+      }
+    }
   }
 
   /**
    * Open all search tabs
    * @private
-   * @param {Array} searchUrls - Array of {url, firstName, lastName, ...} objects
-   * @returns {Promise<Array>} Opened tabs with variant info
+   * @param {Array} searchUrls - Array of {url, source, firstName, lastName, ...} objects
+   * @returns {Promise<Array>} Opened tabs with variant and source info
    */
   async _openSearchTabs(searchUrls) {
     const openedTabs = [];
@@ -104,6 +232,7 @@ export class SearchOrchestrator {
       const tab = await this.chromeAPI.createTab(search.url, false);
       openedTabs.push({
         tab,
+        source: search.source || SOURCES.FAMILYSEARCH,
         firstName: search.firstName,
         lastName: search.lastName,
         spouseName: search.spouseName,
@@ -130,20 +259,20 @@ export class SearchOrchestrator {
   }
 
   /**
-   * Extract from all tabs with deduplication
+   * Extract from all tabs with cross-source deduplication
    * @private
-   * @param {Array} openedTabs - Array of {tab, firstName, lastName, ...} objects
+   * @param {Array} openedTabs - Array of {tab, source, firstName, lastName, ...} objects
    * @param {Function} [statusCallback] - Optional callback for status updates
-   * @returns {Promise<Array>} Deduplicated persons
+   * @returns {Promise<Array>} Deduplicated persons with source tags
    */
   async _extractFromAllTabs(openedTabs, statusCallback) {
     const allPersons = [];
-    const seenIds = new Set(); // FamilySearch IDs
-    const seenNames = new Map(); // name -> person index for name-based dedup
+    const seenIds = new Set(); // Source-specific IDs: "FamilySearch:xxx" or "MyHeritage:yyy"
+    const seenNames = new Map(); // nameKey -> person index for cross-source dedup
     let successCount = 0;
 
     for (let i = 0; i < openedTabs.length; i++) {
-      const { tab, firstName, lastName, spouseName, fatherName, motherName } = openedTabs[i];
+      const { tab, source, firstName, lastName, spouseName, fatherName, motherName } = openedTabs[i];
 
       try {
         // Build variant label for status message
@@ -153,55 +282,70 @@ export class SearchOrchestrator {
 
         this._updateStatus(
           statusCallback,
-          `Extracting from tab ${i + 1}/${openedTabs.length} (${variantLabel})...`,
+          `Extracting from ${source} tab ${i + 1}/${openedTabs.length} (${variantLabel})...`,
           'info'
         );
 
         // Ensure content script is ready
         await ensureContentScriptReady(tab.id);
 
-        // Extract results
+        // Extract basic results from search page (family details fetched later)
         const tabResults = await this.chromeAPI.sendMessageToTab(tab.id, {
           action: 'extractResults'
         });
 
         if (tabResults && tabResults.persons) {
-          // Add variant info and deduplicate
+          // Add source, variant info and deduplicate
           for (const person of tabResults.persons) {
-            // First check by FamilySearch ID (same exact record)
-            if (seenIds.has(person.fsId)) {
-              // Duplicate by fsId - track additional variant
-              const existing = allPersons.find(p => p.fsId === person.fsId);
+            // Get the source-specific ID
+            const sourceId = source === SOURCES.MYHERITAGE ? person.mhId : person.fsId;
+            const fullSourceId = `${source}:${sourceId}`;
+
+            // First check by source-specific ID (same exact record from same source)
+            if (seenIds.has(fullSourceId)) {
+              // Duplicate by ID from same source - just track additional variant
+              const existing = allPersons.find(p =>
+                p.sources?.some(s => s.name === source && s.id === sourceId)
+              );
               if (existing) {
                 this._addVariantToExisting(existing, firstName, lastName);
               }
               continue;
             }
 
-            // Then check by name + birth/death dates (different records for same person)
+            // Then check by name + birth/death dates (cross-source deduplication)
             const nameKey = this._generateNameKey(person);
             if (seenNames.has(nameKey)) {
-              // Duplicate by name - merge into existing
+              // Same person found in another source - MERGE
               const existingIndex = seenNames.get(nameKey);
               const existing = allPersons[existingIndex];
               if (existing) {
                 this._addVariantToExisting(existing, firstName, lastName);
-                // Also track the additional fsId
-                if (!existing.mergedFsIds) {
-                  existing.mergedFsIds = [existing.fsId];
-                }
-                existing.mergedFsIds.push(person.fsId);
+                // Add this source to the existing person
+                this._addSourceToExisting(existing, person, source);
+                // Update sourceTag
+                existing.sourceTag = this._computeSourceTag(existing.sources);
               }
-              seenIds.add(person.fsId); // Mark this fsId as seen too
+              seenIds.add(fullSourceId);
               continue;
             }
 
-            // New person - add variant info
+            // New person - initialize with source info
+            person.source = source; // Primary source
+            person.sources = [{
+              name: source,
+              id: sourceId,
+              url: person.sourceUrl,
+              collection: person.collectionName || '',
+              extractedAt: person.extractedAt || new Date().toISOString()
+            }];
+            person.sourceTag = source === SOURCES.MYHERITAGE ? 'MH' : 'FS';
             person.matchedVariant = `${firstName} ${lastName}`;
             person.originalFirstName = person.originalFirstName || firstName;
             person.originalLastName = person.originalLastName || lastName;
+
             allPersons.push(person);
-            seenIds.add(person.fsId);
+            seenIds.add(fullSourceId);
             seenNames.set(nameKey, allPersons.length - 1);
           }
           successCount++;
@@ -211,7 +355,7 @@ export class SearchOrchestrator {
         await this.chromeAPI.removeTab(tab.id);
 
       } catch (error) {
-        console.error(`[SearchOrchestrator] Failed to extract from tab ${i + 1}:`, error);
+        console.error(`[SearchOrchestrator] Failed to extract from ${source} tab ${i + 1}:`, error);
 
         // Try to close tab even if extraction failed
         try {
@@ -226,10 +370,69 @@ export class SearchOrchestrator {
       `[SearchOrchestrator] Successfully extracted from ${successCount}/${openedTabs.length} tabs`
     );
     console.log(
-      `[SearchOrchestrator] ${allPersons.length} unique persons after name-based deduplication`
+      `[SearchOrchestrator] ${allPersons.length} unique persons after cross-source deduplication`
     );
 
+    // Log source distribution
+    const fsOnly = allPersons.filter(p => p.sourceTag === 'FS').length;
+    const mhOnly = allPersons.filter(p => p.sourceTag === 'MH').length;
+    const both = allPersons.filter(p => p.sourceTag === 'FS+MH').length;
+    console.log(`[SearchOrchestrator] Sources: ${fsOnly} FS only, ${mhOnly} MH only, ${both} both`);
+
     return allPersons;
+  }
+
+  /**
+   * Add a source to an existing person (for cross-source matches)
+   * @private
+   */
+  _addSourceToExisting(existing, newPerson, source) {
+    if (!existing.sources) {
+      existing.sources = [];
+    }
+
+    const sourceId = source === SOURCES.MYHERITAGE ? newPerson.mhId : newPerson.fsId;
+
+    // Check if this source is already added
+    const alreadyHasSource = existing.sources.some(s => s.name === source && s.id === sourceId);
+    if (alreadyHasSource) return;
+
+    existing.sources.push({
+      name: source,
+      id: sourceId,
+      url: newPerson.sourceUrl,
+      collection: newPerson.collectionName || '',
+      extractedAt: newPerson.extractedAt || new Date().toISOString()
+    });
+
+    // Merge family data if the new person has more info
+    if (newPerson.parents?.length && !existing.parents?.length) {
+      existing.parents = newPerson.parents;
+    }
+    if (newPerson.spouses?.length && !existing.spouses?.length) {
+      existing.spouses = newPerson.spouses;
+    }
+    if (newPerson.children?.length && !existing.children?.length) {
+      existing.children = newPerson.children;
+    }
+    if (newPerson.siblings?.length && !existing.siblings?.length) {
+      existing.siblings = newPerson.siblings;
+    }
+  }
+
+  /**
+   * Compute source tag based on sources array
+   * @private
+   */
+  _computeSourceTag(sources) {
+    if (!sources || sources.length === 0) return 'FS';
+
+    const hasFS = sources.some(s => s.name === SOURCES.FAMILYSEARCH);
+    const hasMH = sources.some(s => s.name === SOURCES.MYHERITAGE);
+
+    if (hasFS && hasMH) return 'FS+MH';
+    if (hasMH) return 'MH';
+    return 'FS';
   }
 
   /**

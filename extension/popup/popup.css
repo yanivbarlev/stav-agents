@@ -430,10 +430,98 @@ header h1 {
   font-size: 12px;
   color: #4ade80;
   text-decoration: none;
+  margin-right: 12px;
 }
 
 .result-link:hover {
   text-decoration: underline;
+}
+
+.result-link.fs-link {
+  color: #4ade80;
+}
+
+.result-link.mh-link {
+  color: #60a5fa;
+}
+
+.popup-link {
+  font-size: 10px;
+  color: #60a5fa;
+  text-decoration: none;
+  margin-left: 8px;
+}
+
+.popup-link:hover {
+  text-decoration: underline;
+}
+
+/* Source tags/badges */
+.source-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.source-tag.fs {
+  background: linear-gradient(135deg, #166534 0%, #15803d 100%);
+  color: #bbf7d0;
+  border: 1px solid #22c55e;
+}
+
+.source-tag.mh {
+  background: linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%);
+  color: #bfdbfe;
+  border: 1px solid #3b82f6;
+}
+
+.source-tag.both {
+  background: linear-gradient(135deg, #6b21a8 0%, #7c3aed 100%);
+  color: #e9d5ff;
+  border: 1px solid #a855f7;
+}
+
+/* Result header with name and source tag */
+.result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.result-header .result-name {
+  margin-bottom: 0;
+}
+
+/* Source info in results */
+.result-sources {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.result-source-id {
+  font-size: 10px;
+  color: #666;
+  font-family: monospace;
+  background: #1e293b;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.result-source-id.fs {
+  border-left: 2px solid #22c55e;
+}
+
+.result-source-id.mh {
+  border-left: 2px solid #3b82f6;
 }
 
 .error-section {
@@ -500,4 +588,362 @@ footer a:hover {
 
 .btn-loading {
   animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* Result item header with save button */
+.result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 5px;
+}
+
+.result-header .result-name {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+/* Save button styling */
+.btn-save {
+  padding: 6px 12px;
+  background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.btn-save:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.4);
+}
+
+.btn-save:disabled {
+  background: #374151;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-save.saved {
+  background: linear-gradient(135deg, #166534 0%, #22c55e 100%);
+}
+
+.btn-save.error {
+  background: linear-gradient(135deg, #991b1b 0%, #ef4444 100%);
+}
+
+.save-icon {
+  font-weight: bold;
+}
+
+/* Family info display */
+.result-family {
+  font-size: 11px;
+  color: #60a5fa;
+  margin-top: 6px;
+  padding: 4px 8px;
+  background: rgba(59, 130, 246, 0.1);
+  border-radius: 4px;
+}
+
+/* Result actions row */
+.result-actions {
+  margin-top: 8px;
+}
+
+/* Save status and confirmation */
+.save-status {
+  margin-top: 10px;
+  padding: 10px;
+  background: #0d1117;
+  border-radius: 6px;
+  border: 1px solid #166534;
+}
+
+.save-confirmation {
+  font-size: 12px;
+}
+
+.save-confirmation strong {
+  color: #4ade80;
+  display: block;
+  margin-bottom: 6px;
+}
+
+.family-saved {
+  color: #93c5fd;
+  margin-top: 4px;
+}
+
+.matches-found {
+  color: #fbbf24;
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+/* ============================================
+   HOVER DETAIL POPUP
+   Shows detailed person information on hover
+   ============================================ */
+
+.person-detail-popup {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 340px;
+  max-height: 400px;
+  overflow-y: auto;
+  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+  border: 1px solid #4ade80;
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(74, 222, 128, 0.15);
+  z-index: 1000;
+  padding: 16px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+
+.person-detail-popup.visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Popup Header */
+.popup-header {
+  border-bottom: 1px solid #334155;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+
+.popup-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: #4ade80;
+  margin-bottom: 4px;
+}
+
+.popup-lifespan {
+  font-size: 14px;
+  color: #94a3b8;
+}
+
+.popup-lifespan .year {
+  color: #fff;
+  font-weight: 600;
+}
+
+/* Popup Sections */
+.popup-section {
+  margin-bottom: 14px;
+}
+
+.popup-section:last-child {
+  margin-bottom: 0;
+}
+
+.popup-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #64748b;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.popup-section-title::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+/* Section title colors by category */
+.popup-section.identity .popup-section-title::before {
+  background: #4ade80;
+}
+
+.popup-section.family .popup-section-title::before {
+  background: #60a5fa;
+}
+
+.popup-section.source .popup-section-title::before {
+  background: #a78bfa;
+}
+
+.popup-section.search .popup-section-title::before {
+  background: #fbbf24;
+}
+
+/* Popup rows */
+.popup-row {
+  display: flex;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.popup-row:last-child {
+  margin-bottom: 0;
+}
+
+.popup-label {
+  color: #64748b;
+  min-width: 75px;
+  flex-shrink: 0;
+}
+
+.popup-value {
+  color: #e2e8f0;
+  flex: 1;
+}
+
+.popup-value.highlight {
+  color: #4ade80;
+  font-weight: 500;
+}
+
+.popup-value.muted {
+  color: #64748b;
+  font-style: italic;
+}
+
+/* Family members list */
+.family-member-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.family-member {
+  padding: 6px 10px;
+  background: #1e293b;
+  border-radius: 6px;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: #e2e8f0;
+  border-left: 3px solid #3b82f6;
+}
+
+.family-member:last-child {
+  margin-bottom: 0;
+}
+
+.family-member .relationship-type {
+  font-size: 10px;
+  color: #64748b;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.family-member.parent {
+  border-left-color: #a78bfa;
+}
+
+.family-member.sibling {
+  border-left-color: #4ade80;
+}
+
+.family-member.spouse {
+  border-left-color: #f472b6;
+}
+
+.family-member.child {
+  border-left-color: #60a5fa;
+}
+
+/* Family group */
+.family-group {
+  margin-bottom: 10px;
+}
+
+.family-group:last-child {
+  margin-bottom: 0;
+}
+
+.family-group-label {
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.family-count {
+  background: #334155;
+  color: #94a3b8;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+}
+
+/* No data state */
+.no-data {
+  color: #475569;
+  font-style: italic;
+  font-size: 12px;
+  padding: 8px;
+  text-align: center;
+  background: #0f172a;
+  border-radius: 6px;
+}
+
+/* Search variant chips in popup */
+.variant-chip-small {
+  display: inline-block;
+  padding: 2px 8px;
+  background: #1e40af;
+  color: #93c5fd;
+  border-radius: 10px;
+  font-size: 11px;
+  margin: 2px 4px 2px 0;
+}
+
+.variant-chip-small.matched {
+  background: #166534;
+  color: #86efac;
+}
+
+/* FamilySearch ID styling */
+.fs-id {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 11px;
+  color: #94a3b8;
+  background: #0f172a;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* Popup close hint */
+.popup-hint {
+  text-align: center;
+  font-size: 10px;
+  color: #475569;
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid #1e293b;
+}
+
+/* Result item hover state for popup trigger */
+.result-item {
+  position: relative;
+  cursor: pointer;
+}
+
+.result-item.hover-active {
+  border-color: #4ade80;
+  background: #1e293b;
 }

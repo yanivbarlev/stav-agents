@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "FamilySearch Hebrew Name Search",
-  "version": "1.0.0",
-  "description": "Search FamilySearch with Hebrew names - generates English variants automatically",
+  "name": "Heir Search - Multi-Source",
+  "version": "1.1.0",
+  "description": "Search FamilySearch and MyHeritage with Hebrew names - generates English variants automatically",
 
   "permissions": [
     "activeTab",
@@ -13,11 +13,13 @@
 
   "host_permissions": [
     "https://www.familysearch.org/*",
-    "http://localhost:3000/*"
+    "https://www.myheritage.com/*",
+    "https://www.myheritage.co.il/*",
+    "http://localhost/*"
   ],
 
   "action": {
-    "default_title": "FamilySearch Hebrew Search"
+    "default_title": "Heir Search - Multi-Source"
   },
 
   "side_panel": {
@@ -33,6 +35,11 @@
     {
       "matches": ["https://www.familysearch.org/*"],
       "js": ["content/familysearch.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.myheritage.com/*", "https://www.myheritage.co.il/*"],
+      "js": ["content/myheritage.js"],
       "run_at": "document_idle"
     }
   ]
