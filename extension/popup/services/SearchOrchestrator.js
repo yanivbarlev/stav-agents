@@ -315,11 +315,14 @@ export class SearchOrchestrator {
 
             // Then check by name + birth/death dates (cross-source deduplication)
             const nameKey = this._generateNameKey(person);
+            console.log(`[SearchOrchestrator] ${source} person "${person.fullName}" -> key: "${nameKey}"`);
+
             if (seenNames.has(nameKey)) {
               // Same person found in another source - MERGE
               const existingIndex = seenNames.get(nameKey);
               const existing = allPersons[existingIndex];
               if (existing) {
+                console.log(`[SearchOrchestrator] CROSS-SOURCE MERGE: "${person.fullName}" (${source}) matches "${existing.fullName}" (${existing.source})`);
                 this._addVariantToExisting(existing, firstName, lastName);
                 // Add this source to the existing person
                 this._addSourceToExisting(existing, person, source);
@@ -437,16 +440,30 @@ export class SearchOrchestrator {
 
   /**
    * Generate a unique key for name-based deduplication
-   * Uses name + birth year + death year to identify same person across different records
+   * Uses normalized name + birth year + death year to identify same person across different sources
+   * Normalization handles: different spellings (Levi/Lev/Levy), middle names, etc.
    * @private
    * @param {Object} person - Person object
    * @returns {string} Unique key for deduplication
    */
   _generateNameKey(person) {
-    const name = (person.fullName || '').toLowerCase().trim();
+    const fullName = (person.fullName || '').toLowerCase().trim();
+
+    // Extract first name (first word only, handles middle names/initials)
+    const nameParts = fullName.split(/\s+/);
+    const firstName = nameParts[0] || '';
+
+    // Extract last name (last word) and take first 3 chars to handle spelling variations
+    // This matches: Levi/Lev/Levy, Cohen/Cohn/Kohen, etc.
+    const lastName = nameParts[nameParts.length - 1] || '';
+    const lastNameNormalized = lastName.slice(0, 3);
+
     const birthYear = this._extractYear(person.birthDate);
     const deathYear = this._extractYear(person.deathDate);
-    return `${name}|${birthYear}|${deathYear}`;
+
+    // Key format: firstName|lastNamePrefix|birthYear|deathYear
+    // Example: "larry|lev|1936|2024" matches both "Larry Levi" and "Larry S Lev"
+    return `${firstName}|${lastNameNormalized}|${birthYear}|${deathYear}`;
   }
 
   /**
