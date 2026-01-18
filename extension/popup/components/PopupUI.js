@@ -242,9 +242,17 @@ export class PopupUI {
       // Generate source links
       const sourceLinks = this._generateResultSourceLinks(person);
 
+      // Relevance score badge (if available)
+      const relevanceScore = person.relevanceScore;
+      const relevanceClass = relevanceScore >= 80 ? 'high' : relevanceScore >= 50 ? 'medium' : 'low';
+      const relevanceBadge = relevanceScore !== undefined
+        ? `<span class="relevance-badge ${relevanceClass}" title="Match relevance: ${relevanceScore}%">${Math.round(relevanceScore)}%</span>`
+        : '';
+
       item.innerHTML = `
         <div class="result-header">
           <div class="result-name">
+            ${relevanceBadge}
             ${person.fullName}
             <span class="source-tag ${sourceTagClass}">${sourceTagText}</span>
           </div>

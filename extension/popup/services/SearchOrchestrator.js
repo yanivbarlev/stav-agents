@@ -5,6 +5,7 @@
 
 import { buildMultiSourceSearchUrls, SOURCES } from '../utils/urlBuilder.js';
 import { ensureContentScriptReady, ensureContentScriptReadyFast } from '../utils/contentScriptInjector.js';
+import { sortByRelevance } from '../utils/relevanceScoring.js';
 
 export class SearchOrchestrator {
   /**
@@ -73,13 +74,17 @@ export class SearchOrchestrator {
     // Enrich with family details from detail pages
     await this._enrichWithFamilyDetails(allPersons, statusCallback);
 
+    // Sort by relevance to searched names
+    this._updateStatus(statusCallback, 'Sorting by relevance...', 'info');
+    const sortedPersons = sortByRelevance(allPersons, selectedVariants);
+
     this._updateStatus(
       statusCallback,
-      `Extracted ${allPersons.length} results with family details from ${openedTabs.length} tabs`,
+      `Extracted ${sortedPersons.length} results with family details from ${openedTabs.length} tabs`,
       'success'
     );
 
-    return allPersons;
+    return sortedPersons;
   }
 
   /**

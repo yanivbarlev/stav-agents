@@ -456,6 +456,34 @@ header h1 {
   text-decoration: underline;
 }
 
+/* Relevance score badge */
+.relevance-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  margin-right: 8px;
+  vertical-align: middle;
+  min-width: 32px;
+  text-align: center;
+}
+
+.relevance-badge.high {
+  background: linear-gradient(135deg, #166534 0%, #22c55e 100%);
+  color: #bbf7d0;
+}
+
+.relevance-badge.medium {
+  background: linear-gradient(135deg, #a16207 0%, #eab308 100%);
+  color: #fef9c3;
+}
+
+.relevance-badge.low {
+  background: linear-gradient(135deg, #991b1b 0%, #ef4444 100%);
+  color: #fecaca;
+}
+
 /* Source tags/badges */
 .source-tag {
   display: inline-block;
