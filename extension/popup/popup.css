@@ -8,8 +8,8 @@ body {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
   color: #eee;
-  min-width: 360px;
-  max-width: 400px;
+  min-width: 750px;
+  max-width: 800px;
 }
 
 .container {
@@ -644,6 +644,32 @@ footer a:hover {
   font-weight: bold;
 }
 
+/* Result buttons container */
+.result-buttons {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Details button styling */
+.btn-details {
+  padding: 6px 12px;
+  background: linear-gradient(135deg, #6b21a8 0%, #9333ea 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-details:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(147, 51, 234, 0.4);
+}
+
 /* Family info display */
 .result-family {
   font-size: 11px;
@@ -690,16 +716,28 @@ footer a:hover {
 }
 
 /* ============================================
-   HOVER DETAIL POPUP
-   Shows detailed person information on hover
+   TWO-COLUMN LAYOUT WITH SIDE HOVER POPUP
+   Results on the right, detail popup on the left
    ============================================ */
 
+/* Results section uses right side */
+.results-section {
+  position: relative;
+}
+
+#results-list {
+  max-height: 400px;
+  overflow-y: auto;
+  margin-left: 360px; /* Leave space for popup on the left */
+}
+
+/* Hover detail popup - fixed on the left side */
 .person-detail-popup {
   position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 340px;
-  max-height: 400px;
+  left: 20px;
+  top: 200px;
+  width: 330px;
+  max-height: 450px;
   overflow-y: auto;
   background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
   border: 1px solid #4ade80;
@@ -715,6 +753,25 @@ footer a:hover {
 .person-detail-popup.visible {
   opacity: 1;
   visibility: visible;
+}
+
+/* Placeholder shown when no item is hovered */
+.popup-placeholder {
+  position: fixed;
+  left: 20px;
+  top: 200px;
+  width: 330px;
+  height: 200px;
+  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+  border: 1px dashed #334155;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #475569;
+  font-size: 13px;
+  text-align: center;
+  padding: 20px;
 }
 
 /* Popup Header */

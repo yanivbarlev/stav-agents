@@ -25,25 +25,39 @@ export class PopupUI {
     this.detailPopup = null;
     this.hoverTimeout = null;
     this.activeResultItem = null;
+    this.placeholderElement = null;
     this._createDetailPopup();
   }
 
   /**
-   * Create the detail popup element
+   * Create the detail popup element and placeholder
    * @private
    */
   _createDetailPopup() {
+    // Create the detail popup
     this.detailPopup = document.createElement('div');
     this.detailPopup.className = 'person-detail-popup';
     this.detailPopup.id = 'person-detail-popup';
     document.body.appendChild(this.detailPopup);
 
-    // Hide popup when clicking outside
-    document.addEventListener('click', (e) => {
-      if (!this.detailPopup.contains(e.target) &&
-          !e.target.closest('.result-item')) {
-        this._hideDetailPopup();
+    // Create placeholder shown when no item is hovered
+    this.placeholderElement = document.createElement('div');
+    this.placeholderElement.className = 'popup-placeholder';
+    this.placeholderElement.id = 'popup-placeholder';
+    this.placeholderElement.innerHTML = '👆 Hover over a result to see details';
+    this.placeholderElement.style.display = 'none'; // Hidden until results are shown
+    document.body.appendChild(this.placeholderElement);
+
+    // Keep popup visible when hovering over it
+    this.detailPopup.addEventListener('mouseenter', () => {
+      if (this.hoverTimeout) {
+        clearTimeout(this.hoverTimeout);
+        this.hoverTimeout = null;
       }
+    });
+
+    this.detailPopup.addEventListener('mouseleave', () => {
+      this._hideDetailPopup();
     });
   }
 
@@ -190,6 +204,11 @@ export class PopupUI {
 
     this.resultsList.innerHTML = '';
 
+    // Show placeholder for hover instructions
+    if (this.placeholderElement && results.length > 0) {
+      this.placeholderElement.style.display = 'flex';
+    }
+
     if (results.length === 0) {
       this.resultsList.innerHTML = '<p style="color: #888; text-align: center;">No results found</p>';
       return;
@@ -229,9 +248,14 @@ export class PopupUI {
             ${person.fullName}
             <span class="source-tag ${sourceTagClass}">${sourceTagText}</span>
           </div>
-          <button class="btn-save" data-index="${index}" title="Save to database">
-            <span class="save-icon">+</span> Save
-          </button>
+          <div class="result-buttons">
+            <button class="btn-details" data-index="${index}" title="View full details in new tab">
+              Details
+            </button>
+            <button class="btn-save" data-index="${index}" title="Save to database">
+              <span class="save-icon">+</span> Save
+            </button>
+          </div>
         </div>
         <div class="result-id">ID: ${primaryId}</div>
         <div class="result-details">
@@ -245,10 +269,17 @@ export class PopupUI {
         <div class="save-status hidden" id="save-status-${index}"></div>
       `;
 
+      // Add click handler for details button
+      const detailsBtn = item.querySelector('.btn-details');
+      detailsBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await this._openPersonDetail(person);
+      });
+
       // Add click handler for save button
       const saveBtn = item.querySelector('.btn-save');
       saveBtn.addEventListener('click', (e) => {
-        e.stopPropagation(); // Prevent popup from showing
+        e.stopPropagation();
         this.handleSavePerson(person, index);
       });
 
@@ -258,6 +289,34 @@ export class PopupUI {
 
       this.resultsList.appendChild(item);
     });
+  }
+
+  /**
+   * Open the person detail page in a new tab
+   * @private
+   * @param {Object} person - Person data to display
+   */
+  async _openPersonDetail(person) {
+    try {
+      // Ensure person has an ID
+      if (!person.personId) {
+        const sourceIds = person.sources?.map(s => s.id).join('-') || '';
+        person.personId = sourceIds || `person-${Date.now()}`;
+      }
+
+      // Save person to storage for the detail page to retrieve
+      await chrome.storage.local.set({
+        currentDetailPerson: person
+      });
+
+      // Open detail page in new tab
+      chrome.tabs.create({
+        url: chrome.runtime.getURL(`detail.html?id=${encodeURIComponent(person.personId)}`)
+      });
+    } catch (error) {
+      console.error('[PopupUI] Failed to open detail page:', error);
+      this.showStatus('Failed to open detail page', 'error');
+    }
   }
 
   /**
@@ -276,7 +335,7 @@ export class PopupUI {
     // Show popup after short delay
     this.hoverTimeout = setTimeout(() => {
       this._showDetailPopup(person, item);
-    }, 300);
+    }, 150);
   }
 
   /**
@@ -295,11 +354,11 @@ export class PopupUI {
       if (!this.detailPopup.matches(':hover')) {
         this._hideDetailPopup();
       }
-    }, 200);
+    }, 100);
   }
 
   /**
-   * Show the detail popup for a person
+   * Show the detail popup for a person (positioned on the left side)
    * @private
    * @param {Object} person - Person data
    * @param {HTMLElement} item - The result item element
@@ -315,24 +374,13 @@ export class PopupUI {
     // Generate popup content
     this.detailPopup.innerHTML = this._generatePopupContent(person);
 
-    // Position popup
-    const itemRect = item.getBoundingClientRect();
-    const popupHeight = 400; // max-height from CSS
-
-    // Position above or below item depending on space
-    if (itemRect.top > popupHeight) {
-      this.detailPopup.style.top = `${itemRect.top - popupHeight - 10}px`;
-    } else {
-      this.detailPopup.style.top = `${itemRect.bottom + 10}px`;
+    // Hide placeholder, show popup
+    if (this.placeholderElement) {
+      this.placeholderElement.style.display = 'none';
     }
 
-    // Show popup
+    // Show popup (CSS positions it on the left)
     this.detailPopup.classList.add('visible');
-
-    // Add hover listener to popup itself
-    this.detailPopup.addEventListener('mouseleave', () => {
-      this._hideDetailPopup();
-    });
   }
 
   /**
@@ -344,6 +392,11 @@ export class PopupUI {
     if (this.activeResultItem) {
       this.activeResultItem.classList.remove('hover-active');
       this.activeResultItem = null;
+    }
+
+    // Show placeholder again
+    if (this.placeholderElement) {
+      this.placeholderElement.style.display = 'flex';
     }
   }
 
@@ -392,7 +445,7 @@ export class PopupUI {
         ${this._generateSearchRows(person)}
       </div>
 
-      <div class="popup-hint">Hover to keep open • Click outside to close</div>
+      <div class="popup-hint">Move mouse here to keep open</div>
     `;
   }
 
@@ -805,11 +858,16 @@ export class PopupUI {
     this.resultsCount.textContent = '';
     this.resultsSection.classList.add('hidden');
 
-    // Clean up popup state
+    // Clean up hover popup state
     this._hideDetailPopup();
     if (this.hoverTimeout) {
       clearTimeout(this.hoverTimeout);
       this.hoverTimeout = null;
+    }
+
+    // Hide placeholder when no results
+    if (this.placeholderElement) {
+      this.placeholderElement.style.display = 'none';
     }
   }
 }
