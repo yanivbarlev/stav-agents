@@ -191,16 +191,31 @@ function extractCurrentPageResults() {
 function extractFamilyFromCurrentPage() {
   console.log('[MH Extract] Extracting family from detail page:', window.location.href);
 
+  // Capture raw page text for AI analysis
+  const rawPageText = document.body.innerText || '';
+
   const result = {
     parents: [],
     spouses: [],
     children: [],
     siblings: [],
+    relatives: [],
     sex: '',
     birthDate: '',
     birthPlace: '',
     deathDate: '',
-    deathPlace: ''
+    deathPlace: '',
+    occupation: '',
+    addresses: [],
+    rawRecord: '',
+    // Immigration/travel fields
+    nationality: '',
+    lastResidence: '',
+    maritalStatus: '',
+    arrivalDate: '',
+    departurePort: '',
+    shipName: '',
+    rawPageText: rawPageText.slice(0, 15000) // Limit to ~15KB for API
   };
 
   try {
@@ -221,6 +236,148 @@ function extractFamilyFromCurrentPage() {
       const { date, place } = parseDatePlace(deathMatch[1]);
       result.deathDate = date;
       result.deathPlace = place;
+    }
+
+    // Extract spouse from Hebrew labels (בן/בת זוג) - for records like city directories
+    const spouseMatch = allText.match(/(?:בן\/בת זוג|בן זוג|בת זוג|Spouse)(?:\s*\([^)]*\))?\s*[\t:]\s*([^\n\t]+)/i);
+    if (spouseMatch) {
+      const spouseName = spouseMatch[1].trim();
+      if (spouseName && spouseName.length >= 2 && !result.spouses.some(s => s.name === spouseName)) {
+        result.spouses.push({ name: spouseName, relationship: 'Spouse' });
+        console.log(`[MH Extract] Found spouse from text: ${spouseName}`);
+      }
+    }
+
+    // Extract occupation (מקצוע)
+    const occupationMatch = allText.match(/(?:מקצוע|Occupation)\s*[\t:]\s*([^\n\t]+)/i);
+    if (occupationMatch) {
+      result.occupation = occupationMatch[1].trim();
+      console.log(`[MH Extract] Found occupation: ${result.occupation}`);
+    }
+
+    // Extract residence/address (מגורים)
+    const residenceMatch = allText.match(/(?:מגורים|Residence|Address)\s*[\t:]\s*(\d{4})?\s*([^\n]+)/i);
+    if (residenceMatch) {
+      const year = residenceMatch[1] || '';
+      const place = residenceMatch[2]?.trim() || '';
+      if (place) {
+        result.addresses = result.addresses || [];
+        result.addresses.push({ year, address: place });
+        console.log(`[MH Extract] Found residence: ${year} - ${place}`);
+      }
+    }
+
+    // Extract from Raw Record field (contains address details like "hl76 Girard")
+    const rawRecordMatch = allText.match(/Raw Record\s*[\t:]\s*([^\n]+)/i);
+    if (rawRecordMatch) {
+      result.rawRecord = rawRecordMatch[1].trim();
+      console.log(`[MH Extract] Found raw record: ${result.rawRecord}`);
+    }
+
+    // Extract nationality (אזרחות)
+    const nationalityMatch = allText.match(/(?:אזרחות|Nationality|Citizenship)\s*[\t:]\s*([^\n\t]+)/i);
+    if (nationalityMatch) {
+      result.nationality = nationalityMatch[1].trim();
+      console.log(`[MH Extract] Found nationality: ${result.nationality}`);
+    }
+
+    // Extract last residence (מקום מגורים קבוע אחרון)
+    const lastResidenceMatch = allText.match(/(?:מקום מגורים קבוע אחרון|Last Residence|Last Place of Residence)\s*[\t:]\s*([^\n\t]+)/i);
+    if (lastResidenceMatch) {
+      result.lastResidence = lastResidenceMatch[1].trim();
+      console.log(`[MH Extract] Found last residence: ${result.lastResidence}`);
+    }
+
+    // Extract marital status (מצב משפחתי)
+    const maritalMatch = allText.match(/(?:מצב משפחתי|Marital Status)\s*[\t:]\s*([^\n\t]+)/i);
+    if (maritalMatch) {
+      result.maritalStatus = maritalMatch[1].trim();
+      console.log(`[MH Extract] Found marital status: ${result.maritalStatus}`);
+    }
+
+    // Extract immigration/arrival info (הגעה)
+    const arrivalMatch = allText.match(/(?:הגעה|Arrival)\s*[\t:]\s*([^\n]+)/i);
+    if (arrivalMatch) {
+      result.arrivalDate = arrivalMatch[1].trim();
+      console.log(`[MH Extract] Found arrival: ${result.arrivalDate}`);
+    }
+
+    // Extract departure port (עזיבה)
+    const departureMatch = allText.match(/(?:עזיבה|Departure)\s*[\t:]\s*([^\n\t]+)/i);
+    if (departureMatch) {
+      result.departurePort = departureMatch[1].trim();
+      console.log(`[MH Extract] Found departure: ${result.departurePort}`);
+    }
+
+    // Extract ship name (אניה)
+    const shipMatch = allText.match(/(?:אניה|Ship)\s*[\t:]\s*([^\n\t]+)/i);
+    if (shipMatch) {
+      result.shipName = shipMatch[1].trim();
+      console.log(`[MH Extract] Found ship: ${result.shipName}`);
+    }
+
+    // Extract relatives (קרוב משפחה) - these contain relationship info in parentheses
+    const relativePatterns = [
+      /קרוב משפחה בארץ המוצא\s*[\t:]\s*([^\n]+)/i,
+      /קרוב משפחה שהצטרף בארה"ב\.?\s*[\t:]\s*([^\n]+)/i,
+      /(?:Relative|Contact)\s*[\t:]\s*([^\n]+)/i
+    ];
+
+    result.relatives = result.relatives || [];
+    for (const pattern of relativePatterns) {
+      const match = allText.match(pattern);
+      if (match) {
+        const relativeText = match[1].trim();
+        // Parse "Name (relationship)" format, e.g., "Sara Soboborski (אשה)" or "Jacob ??? (בן/בת דוד)"
+        const relativeMatch = relativeText.match(/^([^(]+)\s*\(([^)]+)\)/);
+        if (relativeMatch) {
+          const name = relativeMatch[1].trim();
+          const relationshipRaw = relativeMatch[2].trim();
+
+          // Map Hebrew relationship terms to English
+          let relationship = relationshipRaw;
+          let sex = '';
+          if (relationshipRaw.includes('אשה') || relationshipRaw.includes('wife')) {
+            relationship = 'Wife';
+            sex = 'F';
+            // Also add as spouse if not already present
+            if (!result.spouses.some(s => s.name === name)) {
+              result.spouses.push({ name, relationship: 'Spouse', sex: 'F' });
+            }
+          } else if (relationshipRaw.includes('בעל') || relationshipRaw.includes('husband')) {
+            relationship = 'Husband';
+            sex = 'M';
+            if (!result.spouses.some(s => s.name === name)) {
+              result.spouses.push({ name, relationship: 'Spouse', sex: 'M' });
+            }
+          } else if (relationshipRaw.includes('בן/בת דוד') || relationshipRaw.includes('cousin')) {
+            relationship = 'Cousin';
+          } else if (relationshipRaw.includes('אח') || relationshipRaw.includes('brother')) {
+            relationship = 'Brother';
+            sex = 'M';
+            if (!result.siblings.some(s => s.name === name)) {
+              result.siblings.push({ name, relationship: 'Sibling', sex: 'M' });
+            }
+          } else if (relationshipRaw.includes('אחות') || relationshipRaw.includes('sister')) {
+            relationship = 'Sister';
+            sex = 'F';
+            if (!result.siblings.some(s => s.name === name)) {
+              result.siblings.push({ name, relationship: 'Sibling', sex: 'F' });
+            }
+          }
+
+          if (!result.relatives.some(r => r.name === name)) {
+            result.relatives.push({ name, relationship, sex, rawRelationship: relationshipRaw });
+            console.log(`[MH Extract] Found relative: ${name} (${relationship})`);
+          }
+        } else {
+          // No parentheses, just add the name
+          if (!result.relatives.some(r => r.name === relativeText)) {
+            result.relatives.push({ name: relativeText, relationship: 'Unknown' });
+            console.log(`[MH Extract] Found relative: ${relativeText}`);
+          }
+        }
+      }
     }
 
     // Extract family members from links

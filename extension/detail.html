@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Person Details - Heir Search</title>
+  <link rel="stylesheet" href="detail.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header Section -->
+    <header class="header">
+      <div class="header-content">
+        <h1 id="person-name">Loading...</h1>
+        <div class="header-meta">
+          <span id="lifespan" class="lifespan"></span>
+          <div id="source-tags" class="source-tags"></div>
+          <span id="enrichment-badge" class="enrichment-badge hidden"></span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="enrich-btn" class="btn btn-enrich">Enrich from Sources</button>
+        <button id="back-btn" class="btn btn-secondary">Back to Search</button>
+      </div>
+    </header>
+
+    <!-- Enrichment Progress Bar -->
+    <div id="enrich-progress" class="enrich-progress hidden">
+      <div class="progress-bar-container">
+        <div id="progress-fill" class="progress-fill" style="width: 0%"></div>
+      </div>
+      <div class="progress-info">
+        <span id="progress-text">Enriching...</span>
+        <button id="cancel-enrich" class="btn-cancel">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Main Content Grid -->
+    <main class="main-content">
+      <!-- Identity Card -->
+      <section class="card card-identity">
+        <div class="card-header">
+          <h2>Identity</h2>
+          <div class="card-accent green"></div>
+        </div>
+        <div class="card-body">
+          <div class="info-row">
+            <span class="info-label">Birth</span>
+            <span id="birth-info" class="info-value">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Birth Place</span>
+            <span id="birth-place" class="info-value">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Death</span>
+            <span id="death-info" class="info-value">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Death Place</span>
+            <span id="death-place" class="info-value">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Age</span>
+            <span id="age-info" class="info-value">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Sex</span>
+            <span id="sex-info" class="info-value">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Nationality</span>
+            <span id="nationality-info" class="info-value">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Last Residence</span>
+            <span id="last-residence-info" class="info-value">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Marital Status</span>
+            <span id="marital-status-info" class="info-value">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Occupation</span>
+            <span id="occupation-info" class="info-value">-</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Sources Card -->
+      <section class="card card-sources">
+        <div class="card-header">
+          <h2>Sources</h2>
+          <div class="card-accent purple"></div>
+        </div>
+        <div class="card-body" id="sources-content">
+          <!-- Populated by JS -->
+        </div>
+      </section>
+
+      <!-- Family Relationships Card -->
+      <section class="card card-family full-width">
+        <div class="card-header">
+          <h2>Family Relationships</h2>
+          <div class="card-accent blue"></div>
+        </div>
+        <div class="card-body">
+          <div class="family-grid">
+            <!-- Parents -->
+            <div class="family-section">
+              <h3 class="family-section-title parents">Parents</h3>
+              <ul id="parents-list" class="family-list">
+                <li class="empty-state">No parents found</li>
+              </ul>
+            </div>
+            <!-- Siblings -->
+            <div class="family-section">
+              <h3 class="family-section-title siblings">Siblings</h3>
+              <ul id="siblings-list" class="family-list">
+                <li class="empty-state">No siblings found</li>
+              </ul>
+            </div>
+            <!-- Spouses -->
+            <div class="family-section">
+              <h3 class="family-section-title spouses">Spouses</h3>
+              <ul id="spouses-list" class="family-list">
+                <li class="empty-state">No spouses found</li>
+              </ul>
+            </div>
+            <!-- Children -->
+            <div class="family-section">
+              <h3 class="family-section-title children">Children</h3>
+              <ul id="children-list" class="family-list">
+                <li class="empty-state">No children found</li>
+              </ul>
+            </div>
+            <!-- Relatives (cousins, extended family) -->
+            <div class="family-section">
+              <h3 class="family-section-title relatives">Relatives</h3>
+              <ul id="relatives-list" class="family-list">
+                <li class="empty-state">No relatives found</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Immigration/Travel Card -->
+      <section id="immigration-card" class="card card-immigration full-width hidden">
+        <div class="card-header">
+          <h2>Immigration & Travel</h2>
+          <div class="card-accent orange"></div>
+        </div>
+        <div class="card-body">
+          <div class="info-row">
+            <span class="info-label">Arrival Date</span>
+            <span id="arrival-date" class="info-value">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Departure Port</span>
+            <span id="departure-port" class="info-value">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Ship Name</span>
+            <span id="ship-name" class="info-value">-</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Addresses Card -->
+      <section id="addresses-card" class="card card-addresses full-width hidden">
+        <div class="card-header">
+          <h2>Addresses</h2>
+          <div class="card-accent teal"></div>
+        </div>
+        <div class="card-body" id="addresses-content">
+          <p class="empty-state">No addresses found</p>
+        </div>
+      </section>
+
+      <!-- Occupations Card -->
+      <section id="occupations-card" class="card card-occupations full-width hidden">
+        <div class="card-header">
+          <h2>Occupations</h2>
+          <div class="card-accent brown"></div>
+        </div>
+        <div class="card-body" id="occupations-content">
+          <p class="empty-state">No occupations found</p>
+        </div>
+      </section>
+
+      <!-- Search Metadata Card -->
+      <section class="card card-search full-width">
+        <div class="card-header">
+          <h2>Search Information</h2>
+          <div class="card-accent yellow"></div>
+        </div>
+        <div class="card-body">
+          <div class="info-row">
+            <span class="info-label">Matched Variant</span>
+            <span id="matched-variant" class="info-value variant-chip">-</span>
+          </div>
+          <div class="info-row" id="searched-variants-row">
+            <span class="info-label">Also Searched</span>
+            <span id="searched-variants" class="info-value">-</span>
+          </div>
+          <div class="info-row" id="hebrew-names-row">
+            <span class="info-label">Hebrew Input</span>
+            <span id="hebrew-names" class="info-value hebrew">-</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer with Source Links -->
+    <footer class="footer">
+      <div class="footer-links" id="source-links">
+        <!-- Populated by JS -->
+      </div>
+      <div class="footer-meta">
+        <span id="extracted-at">-</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Error State -->
+  <div id="error-container" class="error-container hidden">
+    <div class="error-content">
+      <h2>Person Not Found</h2>
+      <p>The requested person data could not be loaded.</p>
+      <button id="error-back-btn" class="btn btn-primary">Back to Search</button>
+    </div>
+  </div>
+
+  <script type="module" src="detail.js"></script>
+</body>
+</html>

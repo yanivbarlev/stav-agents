@@ -6,13 +6,16 @@
 import { buildMultiSourceSearchUrls, SOURCES } from '../utils/urlBuilder.js';
 import { ensureContentScriptReady, ensureContentScriptReadyFast } from '../utils/contentScriptInjector.js';
 import { sortByRelevance } from '../utils/relevanceScoring.js';
+import { BackendAPI } from './BackendAPI.js';
 
 export class SearchOrchestrator {
   /**
    * @param {import('./ChromeExtensionAPI.js').ChromeExtensionAPI} chromeAPI - Chrome API wrapper
+   * @param {BackendAPI} [backendAPI] - Backend API client for AI analysis
    */
-  constructor(chromeAPI) {
+  constructor(chromeAPI, backendAPI = null) {
     this.chromeAPI = chromeAPI;
+    this.backendAPI = backendAPI || new BackendAPI();
   }
 
   // Re-export SOURCES for convenience
@@ -73,6 +76,10 @@ export class SearchOrchestrator {
 
     // Enrich with family details from detail pages
     await this._enrichWithFamilyDetails(allPersons, statusCallback);
+
+    // AI analysis to extract additional details (addresses, occupations, etc.)
+    this._updateStatus(statusCallback, 'Analyzing records with AI...', 'info');
+    await this._analyzeWithAI(allPersons, statusCallback);
 
     // Sort by relevance to searched names
     this._updateStatus(statusCallback, 'Sorting by relevance...', 'info');
@@ -138,90 +145,255 @@ export class SearchOrchestrator {
     if (withDetails && persons.length > 0) {
       this._updateStatus(statusCallback, `Extracting family details from ${persons.length} records...`, 'info');
       await this._enrichWithFamilyDetails(persons, statusCallback);
+
+      // AI analysis to extract additional details
+      this._updateStatus(statusCallback, 'Analyzing records with AI...', 'info');
+      await this._analyzeWithAI(persons, statusCallback);
     }
 
     return persons;
   }
 
   /**
-   * Enrich persons with family data by opening their detail pages
+   * Enrich persons with family data by opening their detail pages (parallel batches)
    * @private
    * @param {Array} persons - Array of person objects with sourceUrl
    * @param {Function} [statusCallback] - Optional callback for status updates
    */
   async _enrichWithFamilyDetails(persons, statusCallback) {
-    for (let i = 0; i < persons.length; i++) {
-      const person = persons[i];
+    const BATCH_SIZE = 3; // Process 3 persons in parallel
 
-      if (!person.sourceUrl) {
-        console.log(`[SearchOrchestrator] No sourceUrl for person ${i + 1}, skipping detail extraction`);
-        continue;
-      }
+    for (let i = 0; i < persons.length; i += BATCH_SIZE) {
+      const batch = persons.slice(i, i + BATCH_SIZE);
+      const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(persons.length / BATCH_SIZE);
 
-      try {
-        this._updateStatus(
-          statusCallback,
-          `Fetching family details ${i + 1}/${persons.length}: ${person.fullName}...`,
-          'info'
-        );
+      this._updateStatus(
+        statusCallback,
+        `Fetching family details batch ${batchNum}/${totalBatches}...`,
+        'info'
+      );
 
-        // Open detail page in background tab
-        const detailTab = await this.chromeAPI.createTab(person.sourceUrl, false);
+      // Process batch in parallel
+      await Promise.all(batch.map(person => this._enrichSinglePerson(person)));
 
-        // Wait for tab to load
-        await this.chromeAPI.waitForTabsLoad([detailTab.id], 15000);
-
-        // Extra wait for content to render (FamilySearch is an SPA)
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // Ensure content script is ready
-        await ensureContentScriptReady(detailTab.id);
-
-        // Extract family data from detail page
-        const familyResult = await this.chromeAPI.sendMessageToTab(detailTab.id, {
-          action: 'extractFamilyFromDetailPage'
-        });
-
-        if (familyResult && familyResult.familyData) {
-          const familyData = familyResult.familyData;
-
-          // Merge family data into person object
-          person.parents = familyData.parents || [];
-          person.spouses = familyData.spouses || [];
-          person.children = familyData.children || [];
-          person.siblings = familyData.siblings || [];
-
-          // Update dates/places if we got better data from detail page
-          if (familyData.birthDate && !person.birthDate) {
-            person.birthDate = familyData.birthDate;
-          }
-          if (familyData.birthPlace && !person.birthPlace) {
-            person.birthPlace = familyData.birthPlace;
-          }
-          if (familyData.deathDate && !person.deathDate) {
-            person.deathDate = familyData.deathDate;
-          }
-          if (familyData.deathPlace && !person.deathPlace) {
-            person.deathPlace = familyData.deathPlace;
-          }
-          if (familyData.sex) {
-            person.sex = familyData.sex;
-          }
-
-          console.log(`[SearchOrchestrator] Enriched ${person.fullName}: ${person.parents.length} parents, ${person.spouses.length} spouses, ${person.children.length} children, ${person.siblings.length} siblings`);
-        }
-
-        // Close detail tab
-        await this.chromeAPI.removeTab(detailTab.id);
-
-        // Small delay between detail page fetches to be nice to the server
+      // Delay between batches (not between each person)
+      if (i + BATCH_SIZE < persons.length) {
         await new Promise(resolve => setTimeout(resolve, 500));
-
-      } catch (error) {
-        console.error(`[SearchOrchestrator] Failed to extract family details for ${person.fullName}:`, error);
-        // Continue with other persons even if one fails
       }
     }
+  }
+
+  /**
+   * Enrich a single person with family data from their detail page
+   * @private
+   * @param {Object} person - Person object with sourceUrl
+   */
+  async _enrichSinglePerson(person) {
+    if (!person.sourceUrl) {
+      console.log(`[SearchOrchestrator] No sourceUrl for ${person.fullName}, skipping detail extraction`);
+      return;
+    }
+
+    let detailTab = null;
+    try {
+      // Open detail page in background tab
+      detailTab = await this.chromeAPI.createTab(person.sourceUrl, false);
+
+      // Wait for tab to load
+      await this.chromeAPI.waitForTabsLoad([detailTab.id], 15000);
+
+      // Extra wait for content to render (FamilySearch is an SPA)
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Ensure content script is ready
+      await ensureContentScriptReady(detailTab.id);
+
+      // Extract family data from detail page
+      const familyResult = await this.chromeAPI.sendMessageToTab(detailTab.id, {
+        action: 'extractFamilyFromDetailPage'
+      });
+
+      if (familyResult?.familyData) {
+        this._mergeFamilyData(person, familyResult.familyData);
+        console.log(`[SearchOrchestrator] Enriched ${person.fullName}: ${person.parents.length} parents, ${person.spouses.length} spouses, ${person.children.length} children, ${person.siblings.length} siblings`);
+      }
+
+      // Close detail tab
+      await this.chromeAPI.removeTab(detailTab.id);
+    } catch (error) {
+      console.error(`[SearchOrchestrator] Failed to enrich ${person.fullName}:`, error);
+      // Try to close tab even if extraction failed
+      if (detailTab) {
+        try {
+          await this.chromeAPI.removeTab(detailTab.id);
+        } catch (closeError) {
+          console.error('[SearchOrchestrator] Failed to close detail tab:', closeError);
+        }
+      }
+    }
+  }
+
+  /**
+   * Merge family data from detail page into person object
+   * @private
+   * @param {Object} person - Person object to update
+   * @param {Object} familyData - Family data from detail page
+   */
+  _mergeFamilyData(person, familyData) {
+    person.parents = familyData.parents || [];
+    person.spouses = familyData.spouses || [];
+    person.children = familyData.children || [];
+    person.siblings = familyData.siblings || [];
+
+    // Merge relatives (cousins, extended family from immigration records)
+    if (familyData.relatives?.length > 0) {
+      person.relatives = familyData.relatives;
+    }
+
+    // Update dates/places if we got better data from detail page
+    if (familyData.birthDate && !person.birthDate) person.birthDate = familyData.birthDate;
+    if (familyData.birthPlace && !person.birthPlace) person.birthPlace = familyData.birthPlace;
+    if (familyData.deathDate && !person.deathDate) person.deathDate = familyData.deathDate;
+    if (familyData.deathPlace && !person.deathPlace) person.deathPlace = familyData.deathPlace;
+    if (familyData.sex) person.sex = familyData.sex;
+
+    // Merge occupation from detail page
+    if (familyData.occupation && !person.occupation) {
+      person.occupations = [{ occupation: familyData.occupation }];
+    }
+
+    // Merge addresses from detail page
+    if (familyData.addresses?.length > 0) {
+      person.addresses = familyData.addresses;
+    }
+
+    // Store raw record for reference
+    if (familyData.rawRecord) {
+      person.rawRecord = familyData.rawRecord;
+    }
+
+    // Immigration/travel fields
+    if (familyData.nationality) person.nationality = familyData.nationality;
+    if (familyData.lastResidence) person.lastResidence = familyData.lastResidence;
+    if (familyData.maritalStatus) person.maritalStatus = familyData.maritalStatus;
+    if (familyData.arrivalDate) person.arrivalDate = familyData.arrivalDate;
+    if (familyData.departurePort) person.departurePort = familyData.departurePort;
+    if (familyData.shipName) person.shipName = familyData.shipName;
+
+    // Store raw page text for AI analysis
+    if (familyData.rawPageText) {
+      person._rawPageText = familyData.rawPageText;
+    }
+  }
+
+  /**
+   * Analyze persons with AI to extract additional details (addresses, occupations, etc.)
+   * @private
+   * @param {Array} persons - Array of person objects
+   * @param {Function} [statusCallback] - Optional callback for status updates
+   */
+  async _analyzeWithAI(persons, statusCallback) {
+    const BATCH_SIZE = 3; // Process 3 persons in parallel
+
+    // Filter persons that have raw page text to analyze
+    const personsToAnalyze = persons.filter(p => p._rawPageText);
+
+    if (personsToAnalyze.length === 0) {
+      console.log('[SearchOrchestrator] No raw page text available for AI analysis');
+      return;
+    }
+
+    console.log(`[SearchOrchestrator] Analyzing ${personsToAnalyze.length} persons with AI`);
+
+    for (let i = 0; i < personsToAnalyze.length; i += BATCH_SIZE) {
+      const batch = personsToAnalyze.slice(i, i + BATCH_SIZE);
+      const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(personsToAnalyze.length / BATCH_SIZE);
+
+      this._updateStatus(
+        statusCallback,
+        `AI analysis batch ${batchNum}/${totalBatches}...`,
+        'info'
+      );
+
+      // Process batch in parallel
+      await Promise.all(batch.map(person => this._analyzeSinglePerson(person)));
+
+      // Small delay between batches
+      if (i + BATCH_SIZE < personsToAnalyze.length) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+    }
+  }
+
+  /**
+   * Analyze a single person with AI
+   * @private
+   * @param {Object} person - Person object with _rawPageText
+   */
+  async _analyzeSinglePerson(person) {
+    if (!person._rawPageText) return;
+
+    try {
+      const analysis = await this.backendAPI.analyzePersonDetails(
+        person.fullName,
+        person._rawPageText,
+        person.source || 'FamilySearch'
+      );
+
+      if (analysis) {
+        this._mergeAIAnalysis(person, analysis);
+        console.log(`[SearchOrchestrator] AI enriched ${person.fullName}`);
+      }
+
+      // Clean up raw text to save memory
+      delete person._rawPageText;
+    } catch (error) {
+      console.error(`[SearchOrchestrator] AI analysis failed for ${person.fullName}:`, error);
+      delete person._rawPageText;
+    }
+  }
+
+  /**
+   * Merge AI analysis results into person object
+   * @private
+   * @param {Object} person - Person object to update
+   * @param {Object} analysis - AI analysis results
+   */
+  _mergeAIAnalysis(person, analysis) {
+    // Add AI-extracted spouse if not already present
+    if (analysis.spouseName && !person.spouses?.some(s => s.name === analysis.spouseName)) {
+      if (!person.spouses) person.spouses = [];
+      person.spouses.push({
+        name: analysis.spouseName,
+        relationship: analysis.spouseRelationship || 'Spouse',
+        aiExtracted: true
+      });
+    }
+
+    // Add addresses with years
+    if (analysis.addresses?.length > 0) {
+      person.addresses = analysis.addresses;
+    }
+
+    // Add occupations with years
+    if (analysis.occupations?.length > 0) {
+      person.occupations = analysis.occupations;
+    }
+
+    // Add alternative names
+    if (analysis.alternativeNames?.length > 0) {
+      person.alternativeNames = analysis.alternativeNames;
+    }
+
+    // Add additional facts
+    if (analysis.additionalFacts?.length > 0) {
+      person.additionalFacts = analysis.additionalFacts;
+    }
+
+    // Store AI confidence
+    person.aiAnalysisConfidence = analysis.confidence;
   }
 
   /**
