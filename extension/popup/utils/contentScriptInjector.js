@@ -3,6 +3,8 @@
  * Handles verification, retry, and manual injection of content scripts
  */
 
+import { debugLogger } from './debugLogger.js';
+
 /**
  * Delay helper function
  * @param {number} ms - Milliseconds to delay
@@ -40,13 +42,17 @@ export async function ensureContentScriptReady(
   scriptPath = null,
   retries = 3
 ) {
+  debugLogger.log('ContentScriptInjector', `ensureContentScriptReady called`, { tabId, scriptPath, retries });
+
   // Auto-detect script path from tab URL if not provided
   if (!scriptPath) {
     try {
       const tab = await chrome.tabs.get(tabId);
       scriptPath = getScriptPathForUrl(tab.url);
+      debugLogger.log('ContentScriptInjector', `Auto-detected script path`, { scriptPath, tabUrl: tab.url });
       console.log(`[ContentScriptInjector] Auto-detected script: ${scriptPath} for ${tab.url}`);
     } catch (e) {
+      debugLogger.error('ContentScriptInjector', 'Failed to get tab info, using default script', e);
       scriptPath = 'content/familysearch.js'; // Default fallback
     }
   }
@@ -54,10 +60,16 @@ export async function ensureContentScriptReady(
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       // Try to ping the content script
-      await chrome.tabs.sendMessage(tabId, { action: 'ping' });
+      debugLogger.log('ContentScriptInjector', `Ping attempt ${attempt + 1}/${retries}`, { tabId });
+      const pingResponse = await chrome.tabs.sendMessage(tabId, { action: 'ping' });
+      debugLogger.log('ContentScriptInjector', `Ping successful`, { tabId, pingResponse });
       console.log(`[ContentScriptInjector] Content script ready on tab ${tabId}`);
       return true;
     } catch (pingError) {
+      debugLogger.log('ContentScriptInjector', `Ping failed attempt ${attempt + 1}/${retries}`, {
+        tabId,
+        error: pingError.message
+      });
       console.log(
         `[ContentScriptInjector] Ping attempt ${attempt + 1}/${retries} failed for tab ${tabId}:`,
         pingError.message
@@ -66,20 +78,30 @@ export async function ensureContentScriptReady(
       // On last attempt, try manual injection
       if (attempt === retries - 1) {
         try {
+          debugLogger.log('ContentScriptInjector', `Attempting manual injection`, { tabId, scriptPath });
           console.log(`[ContentScriptInjector] Attempting manual script injection for tab ${tabId}`);
           await chrome.scripting.executeScript({
             target: { tabId },
             files: [scriptPath]
           });
+          debugLogger.log('ContentScriptInjector', `Manual injection executed, waiting 1s`, { tabId });
 
           // Wait for script to initialize
           await delay(1000);
 
           // Verify injection worked
-          await chrome.tabs.sendMessage(tabId, { action: 'ping' });
+          debugLogger.log('ContentScriptInjector', `Verifying injection with ping`, { tabId });
+          const verifyResponse = await chrome.tabs.sendMessage(tabId, { action: 'ping' });
+          debugLogger.log('ContentScriptInjector', `Manual injection verified`, { tabId, verifyResponse });
           console.log(`[ContentScriptInjector] Manual injection successful for tab ${tabId}`);
           return true;
         } catch (injectError) {
+          debugLogger.error('ContentScriptInjector', `Manual injection failed`, {
+            tabId,
+            scriptPath,
+            error: injectError.message,
+            stack: injectError.stack
+          });
           console.error(
             `[ContentScriptInjector] Manual injection failed for tab ${tabId}:`,
             injectError

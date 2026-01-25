@@ -1,3 +1,5 @@
+import { debugLogger } from '../utils/debugLogger.js';
+
 /**
  * PopupUI - Manages all UI updates and display logic
  * Pure UI component with no business logic
@@ -199,6 +201,22 @@ export class PopupUI {
    * @param {Array} results - Array of person objects
    */
   displayResults(results) {
+    debugLogger.log('PopupUI', '=== DISPLAY RESULTS ===');
+    debugLogger.log('PopupUI', `Received ${results.length} results to display`);
+
+    // Log each result's source info
+    results.forEach((person, idx) => {
+      debugLogger.log('PopupUI', `Displaying result ${idx + 1}:`, {
+        fullName: person.fullName,
+        source: person.source,
+        sourceTag: person.sourceTag,
+        hasAncestryId: !!person.ancestryId,
+        hasMhId: !!person.mhId,
+        hasFsId: !!person.fsId,
+        sourcesArray: person.sources?.map(s => s.name)
+      });
+    });
+
     this.resultsSection.classList.remove('hidden');
     this.resultsCount.textContent = `(${results.length} found)`;
 
@@ -231,8 +249,7 @@ export class PopupUI {
       const totalFamily = parentsCount + siblingsCount + spousesCount + childrenCount;
 
       // Generate source tag based on sourceTag field
-      const sourceTagClass = person.sourceTag === 'FS+MH' ? 'both' :
-                             person.sourceTag === 'MH' ? 'mh' : 'fs';
+      const sourceTagClass = this._getSourceTagClass(person.sourceTag);
       const sourceTagText = person.sourceTag || 'FS';
 
       // Generate ID display - show primary ID or first from sources array
@@ -641,8 +658,7 @@ export class PopupUI {
     // Handle multi-source persons (new format with sources array)
     if (person.sources && person.sources.length > 0) {
       // Show source tag
-      const sourceTagClass = person.sourceTag === 'FS+MH' ? 'both' :
-                             person.sourceTag === 'MH' ? 'mh' : 'fs';
+      const sourceTagClass = this._getSourceTagClass(person.sourceTag);
       html += `
         <div class="popup-row">
           <span class="popup-label">Sources:</span>
@@ -650,9 +666,21 @@ export class PopupUI {
         </div>
       `;
 
-      // Show each source with its ID and link
+      // Deduplicate sources by name for display
+      const seenSources = new Set();
       for (const source of person.sources) {
-        const sourceLabel = source.name === 'FamilySearch' ? 'FS ID' : 'MH ID';
+        if (seenSources.has(source.name)) continue;
+        seenSources.add(source.name);
+
+        let sourceLabel;
+        if (source.name === 'FamilySearch') {
+          sourceLabel = 'FS ID';
+        } else if (source.name === 'Ancestry') {
+          sourceLabel = 'AN ID';
+        } else {
+          sourceLabel = 'MH ID';
+        }
+
         html += `
           <div class="popup-row">
             <span class="popup-label">${sourceLabel}:</span>
@@ -705,6 +733,26 @@ export class PopupUI {
   }
 
   /**
+   * Get CSS class for source tag
+   * @private
+   * @param {string} sourceTag - Source tag string (e.g., 'FS', 'MH', 'AN', 'FS+MH', 'FS+MH+AN')
+   * @returns {string} CSS class name
+   */
+  _getSourceTagClass(sourceTag) {
+    if (!sourceTag) return 'fs';
+
+    // Multi-source combinations
+    if (sourceTag.includes('+')) {
+      return 'multi'; // Use 'multi' class for any combination
+    }
+
+    // Single sources
+    if (sourceTag === 'AN') return 'an';
+    if (sourceTag === 'MH') return 'mh';
+    return 'fs';
+  }
+
+  /**
    * Generate source links for result item
    * @private
    * @param {Object} person - Person data
@@ -713,11 +761,30 @@ export class PopupUI {
   _generateResultSourceLinks(person) {
     // Handle multi-source persons
     if (person.sources && person.sources.length > 0) {
-      return person.sources.map(source => {
-        const linkClass = source.name === 'FamilySearch' ? 'fs-link' : 'mh-link';
-        const linkLabel = source.name === 'FamilySearch' ? 'FamilySearch' : 'MyHeritage';
-        return `<a href="${source.url}" target="_blank" class="result-link ${linkClass}">View on ${linkLabel}</a>`;
-      }).join(' ');
+      // Deduplicate sources by name (only show one link per source type)
+      const seenSources = new Set();
+      const uniqueLinks = [];
+
+      for (const source of person.sources) {
+        if (seenSources.has(source.name)) continue;
+        seenSources.add(source.name);
+
+        let linkClass, linkLabel;
+        if (source.name === 'FamilySearch') {
+          linkClass = 'fs-link';
+          linkLabel = 'FamilySearch';
+        } else if (source.name === 'Ancestry') {
+          linkClass = 'an-link';
+          linkLabel = 'Ancestry';
+        } else {
+          linkClass = 'mh-link';
+          linkLabel = 'MyHeritage';
+        }
+
+        uniqueLinks.push(`<a href="${source.url}" target="_blank" class="result-link ${linkClass}">View on ${linkLabel}</a>`);
+      }
+
+      return uniqueLinks.join(' ');
     }
 
     // Legacy format - single FamilySearch source

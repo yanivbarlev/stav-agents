@@ -1,23 +1,32 @@
 // Ancestry.com Search - Content Script
 // Runs on Ancestry.com pages to extract search results and person details
 
-console.log('[Ancestry] Content script loaded on:', window.location.href);
+console.log('[Ancestry] ====================================');
+console.log('[Ancestry] Content script loaded!');
+console.log('[Ancestry] URL:', window.location.href);
+console.log('[Ancestry] Time:', new Date().toISOString());
+console.log('[Ancestry] ====================================');
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('[Ancestry] Received message:', message);
+  console.log('[Ancestry] Received message:', message.action, message);
 
   if (message.action === 'ping') {
+    console.log('[Ancestry] Responding to ping');
     sendResponse({ status: 'ready', source: 'ancestry' });
     return false;
   }
 
   if (message.action === 'extractResults') {
+    console.log('[Ancestry] Starting extractResults...');
     try {
       const results = extractCurrentPageResults();
+      console.log('[Ancestry] Extraction complete, found', results.length, 'persons');
+      console.log('[Ancestry] First 3 results:', results.slice(0, 3));
       sendResponse({ persons: results, source: 'Ancestry' });
     } catch (error) {
       console.error('[Ancestry] Error extracting results:', error);
+      console.error('[Ancestry] Error stack:', error.stack);
       sendResponse({ error: error.message });
     }
     return false;
@@ -136,17 +145,12 @@ function extractCurrentPageResults() {
   console.log('[Ancestry] Starting extraction on:', window.location.href);
   const persons = [];
 
-  // Ancestry search results selectors (multiple fallbacks)
+  // Ancestry uses .global-results-card for search result cards
   const cardSelectors = [
+    '.global-results-card',
+    '[role="group"][aria-label="result"]',
     '.searchResult',
-    '[data-testid="search-result"]',
-    '.result-card',
-    '.srchHit',
-    'article.record',
-    '.record-result',
-    '.cardContent',
-    '[class*="ResultCard"]',
-    '.result'
+    '[data-testid="search-result"]'
   ];
 
   let cards = [];
@@ -159,42 +163,27 @@ function extractCurrentPageResults() {
   }
 
   if (cards.length === 0) {
-    // Try finding table rows as fallback
-    cards = document.querySelectorAll('table tbody tr');
-    console.log(`[Ancestry] Found ${cards.length} table rows as fallback`);
+    console.log('[Ancestry] No result cards found');
+    return persons;
   }
 
   cards.forEach((card, index) => {
     try {
-      // Try multiple selectors for name
-      const nameSelectors = [
-        '.srchHitName a',
-        '.name a',
-        '[data-testid="name"] a',
-        'h2 a',
-        '.personName a',
-        'a[href*="/person/"]',
-        'a[href*="/discoveryui-content/"]'
-      ];
-
-      let nameLink = null;
+      // Get name from bold spans (Ancestry puts first/last name in separate span.bold elements)
+      const boldSpans = card.querySelectorAll('span.bold');
       let fullName = '';
-      let sourceUrl = '';
-
-      for (const selector of nameSelectors) {
-        nameLink = card.querySelector(selector);
-        if (nameLink) {
-          fullName = cleanText(nameLink.textContent);
-          sourceUrl = nameLink.href || '';
-          break;
-        }
+      if (boldSpans.length >= 2) {
+        fullName = cleanText(boldSpans[0].textContent + ' ' + boldSpans[1].textContent);
+      } else if (boldSpans.length === 1) {
+        fullName = cleanText(boldSpans[0].textContent);
       }
 
-      // Fallback: try to find any name text
+      // Fallback: try to get name from card text
       if (!fullName) {
-        const nameEl = card.querySelector('.name, .srchHitName, [data-testid="name"]');
-        if (nameEl) {
-          fullName = cleanText(nameEl.textContent);
+        const cardText = card.innerText || '';
+        const nameMatch = cardText.match(/Name\s*\n\s*([^\n]+)/);
+        if (nameMatch) {
+          fullName = cleanText(nameMatch[1]);
         }
       }
 
@@ -203,124 +192,80 @@ function extractCurrentPageResults() {
         return;
       }
 
+      // Get source URL and collection name from the first link with /search/collections/
+      let sourceUrl = '';
+      let collectionName = 'Ancestry';
+      const links = card.querySelectorAll('a');
+      for (const link of links) {
+        if (link.href && link.href.includes('/search/collections/')) {
+          sourceUrl = link.href;
+          // The collection name is the text content of this link
+          const linkText = cleanText(link.textContent);
+          if (linkText && linkText.length > 5) {
+            collectionName = linkText;
+          }
+          break;
+        }
+      }
+
       const ancestryId = extractAncestryIdFromUrl(sourceUrl);
 
-      // Get collection/source info
-      const collectionSelectors = [
-        '.collection',
-        '.collectionTitle',
-        '[data-testid="collection"]',
-        '.srchDB',
-        '.database-name'
-      ];
+      // Parse record info from card text (format: "Field\t\nValue")
+      const cardText = card.innerText || '';
 
-      let collectionName = 'Ancestry';
-      for (const selector of collectionSelectors) {
-        const el = card.querySelector(selector);
-        if (el) {
-          collectionName = cleanText(el.textContent) || 'Ancestry';
-          break;
-        }
-      }
-
-      // Get birth info
+      // Extract birth info
       let birthDate = '';
       let birthPlace = '';
-      const birthSelectors = [
-        '.birthDate',
-        '[data-testid="birth"]',
-        '.birth',
-        '.srchBirth'
-      ];
-
-      for (const selector of birthSelectors) {
-        const el = card.querySelector(selector);
-        if (el) {
-          const { date, place } = parseDatePlace(el.textContent);
-          birthDate = date;
-          birthPlace = place;
-          break;
-        }
+      const birthMatch = cardText.match(/Birth\s*\n\s*([^\n]+)/i);
+      if (birthMatch) {
+        const { date, place } = parseDatePlace(birthMatch[1]);
+        birthDate = date;
+        birthPlace = place;
       }
 
-      // Also try to find birth from text patterns
-      if (!birthDate) {
-        const cardText = card.textContent || '';
-        const birthMatch = cardText.match(/(?:Birth|Born|b\.?)\s*[:.]?\s*(\d{1,2}\s+\w+\s+\d{4}|\d{4})/i);
-        if (birthMatch) birthDate = birthMatch[1].trim();
-
-        const birthPlaceMatch = cardText.match(/(?:Birth|Born)\s*[:.]\s*(?:\d+[^,]*,?\s*)?([A-Za-z][^,\n]+(?:,\s*[A-Za-z][^,\n]+)*)/i);
-        if (birthPlaceMatch && !birthPlace) birthPlace = birthPlaceMatch[1].trim();
-      }
-
-      // Get death info
+      // Extract death info
       let deathDate = '';
       let deathPlace = '';
-      const deathSelectors = [
-        '.deathDate',
-        '[data-testid="death"]',
-        '.death',
-        '.srchDeath'
-      ];
-
-      for (const selector of deathSelectors) {
-        const el = card.querySelector(selector);
-        if (el) {
-          const { date, place } = parseDatePlace(el.textContent);
-          deathDate = date;
-          deathPlace = place;
-          break;
-        }
+      const deathMatch = cardText.match(/Death\s*\n\s*([^\n]+)/i);
+      if (deathMatch) {
+        const { date, place } = parseDatePlace(deathMatch[1]);
+        deathDate = date;
+        deathPlace = place;
       }
 
-      // Also try to find death from text patterns
-      if (!deathDate) {
-        const cardText = card.textContent || '';
-        const deathMatch = cardText.match(/(?:Death|Died|d\.?)\s*[:.]?\s*(\d{1,2}\s+\w+\s+\d{4}|\d{4})/i);
-        if (deathMatch) deathDate = deathMatch[1].trim();
-
-        const deathPlaceMatch = cardText.match(/(?:Death|Died)\s*[:.]\s*(?:\d+[^,]*,?\s*)?([A-Za-z][^,\n]+(?:,\s*[A-Za-z][^,\n]+)*)/i);
-        if (deathPlaceMatch && !deathPlace) deathPlace = deathPlaceMatch[1].trim();
+      // Extract arrival info (common in immigration records)
+      let arrivalDate = '';
+      let arrivalPlace = '';
+      const arrivalMatch = cardText.match(/Arrival\s*\n\s*([^\n]+)/i);
+      if (arrivalMatch) {
+        const { date, place } = parseDatePlace(arrivalMatch[1]);
+        arrivalDate = date;
+        arrivalPlace = place;
       }
 
-      // Get family member info from card if available
-      const parents = [];
-      const spouses = [];
-      const children = [];
-
-      // Try to extract parents
-      const parentSelectors = ['.father', '.mother', '.parent', '[data-testid="parent"]'];
-      for (const selector of parentSelectors) {
-        const els = card.querySelectorAll(selector);
-        els.forEach(el => {
-          const name = cleanText(el.textContent);
-          if (name && !parents.some(p => p.name === name)) {
-            const isFather = selector.includes('father') || el.className.includes('father');
-            parents.push({
-              name,
-              relationship: isFather ? 'Father' : 'Mother',
-              sex: isFather ? 'M' : 'F'
-            });
-          }
-        });
+      // Extract departure info
+      let departurePlace = '';
+      const departureMatch = cardText.match(/Departure\s*\n\s*([^\n]+)/i);
+      if (departureMatch) {
+        departurePlace = cleanText(departureMatch[1]);
       }
 
-      // Try to extract spouse
-      const spouseSelectors = ['.spouse', '.partner', '[data-testid="spouse"]'];
-      for (const selector of spouseSelectors) {
-        const el = card.querySelector(selector);
-        if (el) {
-          const name = cleanText(el.textContent);
-          if (name) {
-            spouses.push({ name, relationship: 'Spouse' });
-          }
-        }
+      // Extract residence info
+      let residence = '';
+      const residenceMatch = cardText.match(/Residence\s*\n\s*([^\n]+)/i);
+      if (residenceMatch) {
+        residence = cleanText(residenceMatch[1]);
       }
 
       // Parse name into first and last
       const nameParts = fullName.split(' ');
       const firstName = nameParts[0] || '';
       const lastName = nameParts.slice(1).join(' ') || '';
+
+      // Initialize empty family arrays
+      const parents = [];
+      const spouses = [];
+      const children = [];
 
       const person = {
         ancestryId,
@@ -574,3 +519,17 @@ function extractFamilyFromCurrentPage() {
 
 // Notify that content script is ready
 console.log('[Ancestry] Content script ready');
+
+// Run initial diagnostic
+setTimeout(() => {
+  const cards = document.querySelectorAll('.global-results-card');
+  console.log('[Ancestry] DIAGNOSTIC: Found', cards.length, 'result cards on page');
+  if (cards.length > 0) {
+    const firstCard = cards[0];
+    const spans = firstCard.querySelectorAll('span.bold');
+    console.log('[Ancestry] DIAGNOSTIC: First card has', spans.length, 'bold spans');
+    if (spans.length > 0) {
+      console.log('[Ancestry] DIAGNOSTIC: First name span:', spans[0]?.textContent);
+    }
+  }
+}, 2000);

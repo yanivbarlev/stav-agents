@@ -7,6 +7,7 @@ import { buildMultiSourceSearchUrls, SOURCES } from '../utils/urlBuilder.js';
 import { ensureContentScriptReady, ensureContentScriptReadyFast } from '../utils/contentScriptInjector.js';
 import { sortByRelevance } from '../utils/relevanceScoring.js';
 import { BackendAPI } from './BackendAPI.js';
+import { debugLogger } from '../utils/debugLogger.js';
 
 export class SearchOrchestrator {
   /**
@@ -32,6 +33,13 @@ export class SearchOrchestrator {
    * @returns {Promise<Array>} Extracted and deduplicated persons
    */
   async executeSearch(selectedVariants, searchParams, statusCallback, enabledSources = [SOURCES.FAMILYSEARCH, SOURCES.MYHERITAGE, SOURCES.ANCESTRY]) {
+    // Clear previous logs and start fresh
+    debugLogger.clear();
+    debugLogger.log('SearchOrchestrator', '=== SEARCH STARTED ===');
+    debugLogger.log('SearchOrchestrator', 'Enabled sources', enabledSources);
+    debugLogger.log('SearchOrchestrator', 'Selected variants', selectedVariants);
+    debugLogger.log('SearchOrchestrator', 'Search params', searchParams);
+
     // Validate required fields
     if (!selectedVariants.firstName || selectedVariants.firstName.length === 0) {
       throw new Error('Please select at least one first name variant');
@@ -44,6 +52,8 @@ export class SearchOrchestrator {
 
     // Build all search URL permutations for all enabled sources
     const searchUrls = buildMultiSourceSearchUrls(selectedVariants, searchParams, enabledSources);
+    debugLogger.log('SearchOrchestrator', `Built ${searchUrls.length} search URLs`,
+      searchUrls.map(u => ({ source: u.source, url: u.url.substring(0, 80) })));
 
     const sourceLabel = enabledSources.length > 1 ? enabledSources.join(' + ') : enabledSources[0];
     this._updateStatus(statusCallback, `Opening ${searchUrls.length} search tabs (${sourceLabel})...`, 'info');
@@ -84,6 +94,22 @@ export class SearchOrchestrator {
     // Sort by relevance to searched names
     this._updateStatus(statusCallback, 'Sorting by relevance...', 'info');
     const sortedPersons = sortByRelevance(allPersons, selectedVariants);
+
+    // Log final output for debugging
+    debugLogger.log('SearchOrchestrator', '=== FINAL OUTPUT ===');
+    debugLogger.log('SearchOrchestrator', `Total persons to display: ${sortedPersons.length}`);
+    sortedPersons.forEach((person, idx) => {
+      debugLogger.log('SearchOrchestrator', `Result ${idx + 1}:`, {
+        fullName: person.fullName,
+        source: person.source,
+        sourceTag: person.sourceTag,
+        fsId: person.fsId,
+        mhId: person.mhId,
+        ancestryId: person.ancestryId,
+        sourcesCount: person.sources?.length || 0,
+        sources: person.sources?.map(s => ({ name: s.name, id: s.id }))
+      });
+    });
 
     this._updateStatus(
       statusCallback,
@@ -457,8 +483,18 @@ export class SearchOrchestrator {
     const seenNames = new Map(); // nameKey -> person index for cross-source dedup
     let successCount = 0;
 
+    debugLogger.log('SearchOrchestrator', `Starting extraction from ${openedTabs.length} tabs`);
+
     for (let i = 0; i < openedTabs.length; i++) {
       const { tab, source, firstName, lastName, spouseName, fatherName, motherName } = openedTabs[i];
+
+      debugLogger.log('SearchOrchestrator', `Processing tab ${i + 1}/${openedTabs.length}`, {
+        tabId: tab.id,
+        source,
+        url: tab.url,
+        firstName,
+        lastName
+      });
 
       try {
         // Build variant label for status message
@@ -473,11 +509,21 @@ export class SearchOrchestrator {
         );
 
         // Ensure content script is ready
+        debugLogger.log('SearchOrchestrator', `Ensuring content script ready for tab ${tab.id} (${source})`);
         await ensureContentScriptReady(tab.id);
+        debugLogger.log('SearchOrchestrator', `Content script ready for tab ${tab.id}`);
 
         // Extract basic results from search page (family details fetched later)
+        debugLogger.log('SearchOrchestrator', `Sending extractResults message to tab ${tab.id}`);
         const tabResults = await this.chromeAPI.sendMessageToTab(tab.id, {
           action: 'extractResults'
+        });
+
+        debugLogger.log('SearchOrchestrator', `Received response from tab ${tab.id}`, {
+          hasPersons: !!(tabResults && tabResults.persons),
+          personCount: tabResults?.persons?.length || 0,
+          error: tabResults?.error || null,
+          rawResponse: tabResults
         });
 
         if (tabResults && tabResults.persons) {
@@ -551,16 +597,24 @@ export class SearchOrchestrator {
         await this.chromeAPI.removeTab(tab.id);
 
       } catch (error) {
+        debugLogger.error('SearchOrchestrator', `Failed to extract from ${source} tab ${i + 1}`, error);
         console.error(`[SearchOrchestrator] Failed to extract from ${source} tab ${i + 1}:`, error);
 
         // Try to close tab even if extraction failed
         try {
           await this.chromeAPI.removeTab(tab.id);
         } catch (closeError) {
+          debugLogger.error('SearchOrchestrator', 'Failed to close tab', closeError);
           console.error('[SearchOrchestrator] Failed to close tab:', closeError);
         }
       }
     }
+
+    debugLogger.log('SearchOrchestrator', `Extraction complete`, {
+      successCount,
+      totalTabs: openedTabs.length,
+      uniquePersons: allPersons.length
+    });
 
     console.log(
       `[SearchOrchestrator] Successfully extracted from ${successCount}/${openedTabs.length} tabs`

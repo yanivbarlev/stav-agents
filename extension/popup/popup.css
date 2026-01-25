@@ -445,6 +445,10 @@ header h1 {
   color: #60a5fa;
 }
 
+.result-link.an-link {
+  color: #fbbf24;
+}
+
 .popup-link {
   font-size: 10px;
   color: #60a5fa;
@@ -515,6 +519,18 @@ header h1 {
   border: 1px solid #a855f7;
 }
 
+.source-tag.an {
+  background: linear-gradient(135deg, #a16207 0%, #ca8a04 100%);
+  color: #fef9c3;
+  border: 1px solid #eab308;
+}
+
+.source-tag.multi {
+  background: linear-gradient(135deg, #6b21a8 0%, #7c3aed 100%);
+  color: #e9d5ff;
+  border: 1px solid #a855f7;
+}
+
 /* Result header with name and source tag */
 .result-header {
   display: flex;
@@ -550,6 +566,10 @@ header h1 {
 
 .result-source-id.mh {
   border-left: 2px solid #3b82f6;
+}
+
+.result-source-id.an {
+  border-left: 2px solid #eab308;
 }
 
 .error-section {
@@ -1031,4 +1051,23 @@ footer a:hover {
 .result-item.hover-active {
   border-color: #4ade80;
   background: #1e293b;
+}
+
+/* Debug button */
+.btn-debug {
+  margin-top: 10px;
+  padding: 6px 12px;
+  background: #374151;
+  color: #9ca3af;
+  border: 1px solid #4b5563;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-debug:hover {
+  background: #4b5563;
+  color: #e5e7eb;
+  border-color: #6b7280;
 }

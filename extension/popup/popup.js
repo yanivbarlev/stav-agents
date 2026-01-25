@@ -10,6 +10,7 @@ import { SearchOrchestrator } from './services/SearchOrchestrator.js';
 import { PopupUI } from './components/PopupUI.js';
 import { ButtonLoader } from './utils/ButtonLoader.js';
 import { collectFormParams, populateFormFields } from './utils/formUtils.js';
+import { debugLogger } from './utils/debugLogger.js';
 
 // Initialize services
 const state = new SearchState();
@@ -66,6 +67,15 @@ function setupEventListeners() {
   const retryBtn = document.getElementById('retry-btn');
   if (retryBtn) {
     retryBtn.addEventListener('click', () => handleGenerateVariants());
+  }
+
+  // Debug export button
+  const debugBtn = document.getElementById('export-debug-btn');
+  if (debugBtn) {
+    debugBtn.addEventListener('click', () => {
+      debugLogger.log('User', 'Debug log export requested');
+      debugLogger.exportToFile();
+    });
   }
 }
 
@@ -164,6 +174,20 @@ async function handleExecuteSearch() {
         state.params,
         (message, type) => ui.showStatus(message, type)
       );
+
+      // Log results before display
+      debugLogger.log('Popup', '=== RESULTS FROM ORCHESTRATOR ===');
+      debugLogger.log('Popup', `Received ${results.length} results`);
+      results.forEach((person, idx) => {
+        debugLogger.log('Popup', `Person ${idx + 1}:`, {
+          fullName: person.fullName,
+          source: person.source,
+          sourceTag: person.sourceTag,
+          ancestryId: person.ancestryId,
+          mhId: person.mhId,
+          fsId: person.fsId
+        });
+      });
 
       // Display results
       ui.showStatus(`Found ${results.length} unique results`, 'success');
