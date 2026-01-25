@@ -4,9 +4,9 @@ This file provides context for Claude Code when working in this repository.
 
 ## Project Overview
 
-This is an **Heir Search System** - a tool for genealogical research that extracts records from FamilySearch.org to help locate potential heirs. The system consists of:
+This is an **Heir Search System** - a tool for genealogical research that extracts records from multiple genealogy sources to help locate potential heirs. The system consists of:
 
-1. **Chrome Extension** - Searches FamilySearch, extracts person records, handles Hebrew name variants
+1. **Chrome Extension** - Searches FamilySearch, MyHeritage, and Ancestry, extracts person records, handles Hebrew name variants
 2. **Express API Server** - Generates name variants (Hebrew → English), manages Neo4j database
 3. **Neo4j Graph Database** - Stores persons and family relationships
 
@@ -24,10 +24,10 @@ This is an **Heir Search System** - a tool for genealogical research that extrac
          │                  │  Name transliteration│
          │                  └─────────────────────┘
          ▼
-┌─────────────────────┐
-│  FamilySearch.org   │
-│  (search results)   │
-└─────────────────────┘
+┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
+│  FamilySearch.org   │     │  MyHeritage.com     │     │  Ancestry.com       │
+│  (search results)   │     │  (search results)   │     │  (search results)   │
+└─────────────────────┘     └─────────────────────┘     └─────────────────────┘
 ```
 
 ## Key Directories
@@ -59,7 +59,9 @@ stav-agents/
 │   │   ├── state/                 # State management
 │   │   └── utils/                 # URL builders, helpers
 │   ├── content/
-│   │   └── familysearch.js        # Content script for extraction
+│   │   ├── familysearch.js        # Content script for FamilySearch extraction
+│   │   ├── myheritage.js          # Content script for MyHeritage extraction
+│   │   └── ancestry.js            # Content script for Ancestry extraction
 │   └── background/
 │       └── background.js          # Service worker
 └── Documents/
@@ -233,6 +235,7 @@ The enrichment system fetches detailed data from source URLs (FamilySearch, MyHe
 |------|---------|----------------|
 | `extension/content/myheritage.js` | Extracts data from MyHeritage pages | Adding new fields from MyHeritage |
 | `extension/content/familysearch.js` | Extracts data from FamilySearch pages | Adding new fields from FamilySearch |
+| `extension/content/ancestry.js` | Extracts data from Ancestry pages | Adding new fields from Ancestry |
 | `extension/popup/services/EnrichmentService.js` | Merges data from multiple sources | Adding new fields to merge logic |
 | `extension/detail.html` | UI structure for enriched profile | Adding new display sections |
 | `extension/detail.js` | Renders enriched data to UI | Adding render functions for new fields |
@@ -350,10 +353,26 @@ function renderNewSection(person) {
 
 6. **Not handling empty/missing data**: Always check if data exists before rendering, and hide sections gracefully.
 
-### Adding a New Data Source (e.g., Ancestry.com)
+### Supported Data Sources
 
-1. Create new content script: `extension/content/ancestry.js`
-2. Add to `manifest.json` content_scripts with URL pattern
-3. Implement `extractFamilyFromDetailPage` message handler
-4. Update `EnrichmentService._fetchFromSource()` to detect new source URL
-5. Test extraction independently before integrating
+Currently integrated sources:
+- **FamilySearch** (familysearch.org) - Free genealogy records
+- **MyHeritage** (myheritage.com/myheritage.co.il) - Requires paid account
+- **Ancestry** (ancestry.com) - Requires paid account
+
+### Adding a New Data Source
+
+To add a new genealogy source:
+1. Create new content script: `extension/content/[source].js`
+2. Add to `manifest.json`:
+   - Add URL to `host_permissions`
+   - Add content_scripts entry with URL pattern
+3. Implement message handlers: `ping`, `checkLogin`, `extractResults`, `extractFamilyFromDetailPage`
+4. Update `extension/popup/utils/urlBuilder.js`:
+   - Add source to `SOURCES` constant
+   - Create `build[Source]SearchUrl()` function
+   - Update `buildSearchUrlPermutations()` and `buildMultiSourceSearchUrls()`
+5. Update `extension/popup/utils/contentScriptInjector.js`: Add URL detection in `getScriptPathForUrl()`
+6. Update `extension/popup/services/SearchOrchestrator.js`: Add source detection and ID handling
+7. Update `extension/popup/services/EnrichmentService.js`: Add source URL detection
+8. Test extraction independently before integrating

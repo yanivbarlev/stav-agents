@@ -107,8 +107,10 @@ export class SearchOrchestrator {
     let source = SOURCES.FAMILYSEARCH;
     if (tab.url?.includes('myheritage.com') || tab.url?.includes('myheritage.co.il')) {
       source = SOURCES.MYHERITAGE;
+    } else if (tab.url?.includes('ancestry.com')) {
+      source = SOURCES.ANCESTRY;
     } else if (!tab.url?.includes('familysearch.org')) {
-      throw new Error('Please navigate to a FamilySearch or MyHeritage search results page first');
+      throw new Error('Please navigate to a FamilySearch, MyHeritage, or Ancestry search results page first');
     }
 
     this._updateStatus(statusCallback, `Extracting from ${source}...`, 'info');
@@ -129,7 +131,14 @@ export class SearchOrchestrator {
 
     // Add source info to each person
     for (const person of persons) {
-      const sourceId = source === SOURCES.MYHERITAGE ? person.mhId : person.fsId;
+      let sourceId;
+      if (source === SOURCES.MYHERITAGE) {
+        sourceId = person.mhId;
+      } else if (source === SOURCES.ANCESTRY) {
+        sourceId = person.ancestryId;
+      } else {
+        sourceId = person.fsId;
+      }
       person.source = source;
       person.sources = [{
         name: source,
@@ -138,7 +147,7 @@ export class SearchOrchestrator {
         collection: person.collectionName || '',
         extractedAt: person.extractedAt || new Date().toISOString()
       }];
-      person.sourceTag = source === SOURCES.MYHERITAGE ? 'MH' : 'FS';
+      person.sourceTag = this._getSourceTag(source);
     }
 
     // If withDetails is true, enrich each person with family data from detail pages
@@ -475,7 +484,14 @@ export class SearchOrchestrator {
           // Add source, variant info and deduplicate
           for (const person of tabResults.persons) {
             // Get the source-specific ID
-            const sourceId = source === SOURCES.MYHERITAGE ? person.mhId : person.fsId;
+            let sourceId;
+            if (source === SOURCES.MYHERITAGE) {
+              sourceId = person.mhId;
+            } else if (source === SOURCES.ANCESTRY) {
+              sourceId = person.ancestryId;
+            } else {
+              sourceId = person.fsId;
+            }
             const fullSourceId = `${source}:${sourceId}`;
 
             // First check by source-specific ID (same exact record from same source)
@@ -519,7 +535,7 @@ export class SearchOrchestrator {
               collection: person.collectionName || '',
               extractedAt: person.extractedAt || new Date().toISOString()
             }];
-            person.sourceTag = source === SOURCES.MYHERITAGE ? 'MH' : 'FS';
+            person.sourceTag = this._getSourceTag(source);
             person.matchedVariant = `${firstName} ${lastName}`;
             person.originalFirstName = person.originalFirstName || firstName;
             person.originalLastName = person.originalLastName || lastName;
@@ -556,8 +572,9 @@ export class SearchOrchestrator {
     // Log source distribution
     const fsOnly = allPersons.filter(p => p.sourceTag === 'FS').length;
     const mhOnly = allPersons.filter(p => p.sourceTag === 'MH').length;
-    const both = allPersons.filter(p => p.sourceTag === 'FS+MH').length;
-    console.log(`[SearchOrchestrator] Sources: ${fsOnly} FS only, ${mhOnly} MH only, ${both} both`);
+    const anOnly = allPersons.filter(p => p.sourceTag === 'AN').length;
+    const multiSource = allPersons.filter(p => p.sourceTag?.includes('+')).length;
+    console.log(`[SearchOrchestrator] Sources: ${fsOnly} FS only, ${mhOnly} MH only, ${anOnly} AN only, ${multiSource} multi-source`);
 
     return allPersons;
   }
@@ -571,7 +588,14 @@ export class SearchOrchestrator {
       existing.sources = [];
     }
 
-    const sourceId = source === SOURCES.MYHERITAGE ? newPerson.mhId : newPerson.fsId;
+    let sourceId;
+    if (source === SOURCES.MYHERITAGE) {
+      sourceId = newPerson.mhId;
+    } else if (source === SOURCES.ANCESTRY) {
+      sourceId = newPerson.ancestryId;
+    } else {
+      sourceId = newPerson.fsId;
+    }
 
     // Check if this source is already added
     const alreadyHasSource = existing.sources.some(s => s.name === source && s.id === sourceId);
@@ -609,9 +633,24 @@ export class SearchOrchestrator {
 
     const hasFS = sources.some(s => s.name === SOURCES.FAMILYSEARCH);
     const hasMH = sources.some(s => s.name === SOURCES.MYHERITAGE);
+    const hasAN = sources.some(s => s.name === SOURCES.ANCESTRY);
 
-    if (hasFS && hasMH) return 'FS+MH';
-    if (hasMH) return 'MH';
+    // Build tag string for all present sources
+    const tags = [];
+    if (hasFS) tags.push('FS');
+    if (hasMH) tags.push('MH');
+    if (hasAN) tags.push('AN');
+
+    return tags.join('+') || 'FS';
+  }
+
+  /**
+   * Get source tag abbreviation for a single source
+   * @private
+   */
+  _getSourceTag(source) {
+    if (source === SOURCES.MYHERITAGE) return 'MH';
+    if (source === SOURCES.ANCESTRY) return 'AN';
     return 'FS';
   }
 

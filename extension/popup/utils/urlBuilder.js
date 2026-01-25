@@ -5,7 +5,8 @@
 // Source constants
 export const SOURCES = {
   FAMILYSEARCH: 'FamilySearch',
-  MYHERITAGE: 'MyHeritage'
+  MYHERITAGE: 'MyHeritage',
+  ANCESTRY: 'Ancestry'
 };
 
 /**
@@ -73,6 +74,54 @@ export function buildSearchUrl(firstName, lastName, searchParams = {}) {
   }
 
   const baseUrl = 'https://www.familysearch.org/en/search/record/results';
+  return `${baseUrl}?${urlParams.toString()}`;
+}
+
+/**
+ * Build an Ancestry.com search URL with given parameters
+ * @param {string} firstName - First name to search
+ * @param {string} lastName - Last name to search
+ * @param {Object} searchParams - Additional search parameters
+ * @returns {string} Complete Ancestry search URL
+ */
+export function buildAncestrySearchUrl(firstName, lastName, searchParams = {}) {
+  // Ancestry uses a specific URL format for historical record searches
+  // Example: https://www.ancestry.com/search/?name=John_Smith&birth=1900_10&death=1980_10
+  const baseUrl = 'https://www.ancestry.com/search/';
+  const urlParams = new URLSearchParams();
+
+  // Build name parameter: FirstName_LastName format
+  if (firstName && lastName) {
+    urlParams.append('name', `${firstName}_${lastName}`);
+  } else if (firstName) {
+    urlParams.append('name', `${firstName}_`);
+  } else if (lastName) {
+    urlParams.append('name', `_${lastName}`);
+  }
+
+  // Add birth year with range
+  if (searchParams.birthYear) {
+    const range = searchParams.birthYearRange || 10;
+    urlParams.append('birth', `${searchParams.birthYear}_${range}`);
+  }
+
+  // Add death year with range
+  if (searchParams.deathYear) {
+    const range = searchParams.deathYearRange || 5;
+    urlParams.append('death', `${searchParams.deathYear}_${range}`);
+  }
+
+  // Add birth place
+  if (searchParams.birthPlace) {
+    urlParams.append('birth_x', 'p');
+    urlParams.append('BPLN', searchParams.birthPlace);
+  }
+
+  // Add any place
+  if (searchParams.anyPlace) {
+    urlParams.append('RSPN', searchParams.anyPlace);
+  }
+
   return `${baseUrl}?${urlParams.toString()}`;
 }
 
@@ -155,6 +204,8 @@ export function buildSearchUrlPermutations(selectedVariants, searchParams, sourc
             let url;
             if (source === SOURCES.MYHERITAGE) {
               url = buildMyHeritageSearchUrl(firstName, lastName, variantParams);
+            } else if (source === SOURCES.ANCESTRY) {
+              url = buildAncestrySearchUrl(firstName, lastName, variantParams);
             } else {
               url = buildSearchUrl(firstName, lastName, variantParams);
             }
@@ -184,7 +235,7 @@ export function buildSearchUrlPermutations(selectedVariants, searchParams, sourc
  * @param {string[]} [enabledSources] - Which sources to include (default: both)
  * @returns {Array<{url: string, source: string, firstName: string, lastName: string, ...}>}
  */
-export function buildMultiSourceSearchUrls(selectedVariants, searchParams, enabledSources = [SOURCES.FAMILYSEARCH, SOURCES.MYHERITAGE]) {
+export function buildMultiSourceSearchUrls(selectedVariants, searchParams, enabledSources = [SOURCES.FAMILYSEARCH, SOURCES.MYHERITAGE, SOURCES.ANCESTRY]) {
   const allUrls = [];
 
   for (const source of enabledSources) {

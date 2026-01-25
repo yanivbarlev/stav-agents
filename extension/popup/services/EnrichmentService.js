@@ -154,8 +154,9 @@ export class EnrichmentService {
     // Determine which content script to use based on URL
     const isFamilySearch = source.url.includes('familysearch.org');
     const isMyHeritage = source.url.includes('myheritage.com') || source.url.includes('myheritage.co.il');
+    const isAncestry = source.url.includes('ancestry.com');
 
-    if (!isFamilySearch && !isMyHeritage) {
+    if (!isFamilySearch && !isMyHeritage && !isAncestry) {
       throw new Error(`Unsupported source URL: ${source.url}`);
     }
 

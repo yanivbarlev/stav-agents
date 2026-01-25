@@ -429,51 +429,51 @@ Mark each step with ~~strikethrough~~ when complete.
 - [ ] 1.7 Identify Ancestry ID format in URLs
 
 ### Phase 2: Manifest & Config
-- [ ] 2.1 Add `https://www.ancestry.com/*` to host_permissions in manifest.json
-- [ ] 2.2 Add ancestry.js content script entry to manifest.json
+- [x] 2.1 Add `https://www.ancestry.com/*` to host_permissions in manifest.json
+- [x] 2.2 Add ancestry.js content script entry to manifest.json
 - [ ] 2.3 Reload extension and verify no errors
 
 ### Phase 3: Content Script (Basic)
-- [ ] 3.1 Create `extension/content/ancestry.js` with console.log
-- [ ] 3.2 Add ping message handler
-- [ ] 3.3 Add checkLogin handler
+- [x] 3.1 Create `extension/content/ancestry.js` with console.log
+- [x] 3.2 Add ping message handler
+- [x] 3.3 Add checkLogin handler
 - [ ] 3.4 Reload extension
 - [ ] 3.5 Open Ancestry.com, verify "[Ancestry] Content script loaded" in console
 - [ ] 3.6 Test ping from extension DevTools
 
 ### Phase 4: URL Builder
-- [ ] 4.1 Add ANCESTRY to SOURCES in urlBuilder.js
-- [ ] 4.2 Create buildAncestrySearchUrl() function
-- [ ] 4.3 Update buildSearchUrlPermutations() to handle Ancestry
-- [ ] 4.4 Update buildMultiSourceSearchUrls() to include Ancestry
+- [x] 4.1 Add ANCESTRY to SOURCES in urlBuilder.js
+- [x] 4.2 Create buildAncestrySearchUrl() function
+- [x] 4.3 Update buildSearchUrlPermutations() to handle Ancestry
+- [x] 4.4 Update buildMultiSourceSearchUrls() to include Ancestry
 - [ ] 4.5 Test URL generation manually
 
 ### Phase 5: Search Results Extraction
-- [ ] 5.1 Implement extractSearchResults() in ancestry.js
-- [ ] 5.2 Extract: ancestryId, fullName, birthDate, birthPlace, deathDate, deathPlace
-- [ ] 5.3 Extract: sourceUrl, collectionName
+- [x] 5.1 Implement extractSearchResults() in ancestry.js
+- [x] 5.2 Extract: ancestryId, fullName, birthDate, birthPlace, deathDate, deathPlace
+- [x] 5.3 Extract: sourceUrl, collectionName
 - [ ] 5.4 Test extraction on Ancestry search results page
 - [ ] 5.5 Verify results array is populated correctly
 
 ### Phase 6: SearchOrchestrator Integration
-- [ ] 6.1 Add Ancestry to _getSourceFromUrl()
-- [ ] 6.2 Add ancestryId to deduplication logic
-- [ ] 6.3 Update source tag generation (AN, FS+AN, MH+AN, FS+MH+AN)
+- [x] 6.1 Add Ancestry to _getSourceFromUrl()
+- [x] 6.2 Add ancestryId to deduplication logic
+- [x] 6.3 Update source tag generation (AN, FS+AN, MH+AN, FS+MH+AN)
 - [ ] 6.4 Test multi-source search with Ancestry enabled
 - [ ] 6.5 Verify Ancestry results appear in popup
 
 ### Phase 7: Detail Page Extraction
-- [ ] 7.1 Implement extractFamilyFromDetailPage() in ancestry.js
-- [ ] 7.2 Extract parents array
-- [ ] 7.3 Extract spouses array
-- [ ] 7.4 Extract children array
-- [ ] 7.5 Extract siblings array (if available)
-- [ ] 7.6 Extract rawPageText for AI analysis
+- [x] 7.1 Implement extractFamilyFromDetailPage() in ancestry.js
+- [x] 7.2 Extract parents array
+- [x] 7.3 Extract spouses array
+- [x] 7.4 Extract children array
+- [x] 7.5 Extract siblings array (if available)
+- [x] 7.6 Extract rawPageText for AI analysis
 - [ ] 7.7 Test on Ancestry person detail page
 
 ### Phase 8: EnrichmentService Integration
-- [ ] 8.1 Update _getSourceFromUrl() in EnrichmentService.js
-- [ ] 8.2 Update contentScriptInjector.js with Ancestry script path
+- [x] 8.1 Update _getSourceFromUrl() in EnrichmentService.js
+- [x] 8.2 Update contentScriptInjector.js with Ancestry script path
 - [ ] 8.3 Test enrichment flow with Ancestry source
 - [ ] 8.4 Verify family data merges correctly
 
@@ -487,7 +487,7 @@ Mark each step with ~~strikethrough~~ when complete.
 
 ### Phase 10: Cleanup & Commit
 - [ ] 10.1 Remove debug console.logs (keep essential ones)
-- [ ] 10.2 Update CLAUDE.md with Ancestry documentation
+- [x] 10.2 Update CLAUDE.md with Ancestry documentation
 - [ ] 10.3 Commit changes with descriptive message
 - [ ] 10.4 Mark this plan as COMPLETE
 
@@ -495,9 +495,18 @@ Mark each step with ~~strikethrough~~ when complete.
 
 ## Progress Tracking
 
-**Current Phase:** Not started
+**Current Phase:** Implementation Complete
 **Blockers:** None
-**Last Updated:** -
+**Last Updated:** January 25, 2026
+
+### Completed Steps:
+- [x] manifest.json updated with Ancestry permissions and content script
+- [x] ancestry.js content script created with ping, checkLogin, extractResults, extractFamilyFromDetailPage
+- [x] urlBuilder.js updated with ANCESTRY source and buildAncestrySearchUrl()
+- [x] SearchOrchestrator.js updated with Ancestry source detection and deduplication
+- [x] EnrichmentService.js updated to support Ancestry URLs
+- [x] contentScriptInjector.js updated with auto-detection for Ancestry scripts
+- [x] CLAUDE.md updated with Ancestry documentation
 
 ---
 
