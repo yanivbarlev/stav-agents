@@ -28,10 +28,10 @@ export class SearchOrchestrator {
    * @param {Object} selectedVariants - Selected variants for each field
    * @param {Object} searchParams - Search parameters
    * @param {Function} [statusCallback] - Optional callback for status updates
-   * @param {string[]} [enabledSources] - Which sources to search (default: both FS and MH)
+   * @param {string[]} [enabledSources] - Which sources to search (default: FS, MH, and AN)
    * @returns {Promise<Array>} Extracted and deduplicated persons
    */
-  async executeSearch(selectedVariants, searchParams, statusCallback, enabledSources = [SOURCES.FAMILYSEARCH, SOURCES.MYHERITAGE]) {
+  async executeSearch(selectedVariants, searchParams, statusCallback, enabledSources = [SOURCES.FAMILYSEARCH, SOURCES.MYHERITAGE, SOURCES.ANCESTRY]) {
     // Validate required fields
     if (!selectedVariants.firstName || selectedVariants.firstName.length === 0) {
       throw new Error('Please select at least one first name variant');
@@ -45,7 +45,7 @@ export class SearchOrchestrator {
     // Build all search URL permutations for all enabled sources
     const searchUrls = buildMultiSourceSearchUrls(selectedVariants, searchParams, enabledSources);
 
-    const sourceLabel = enabledSources.length > 1 ? 'FamilySearch + MyHeritage' : enabledSources[0];
+    const sourceLabel = enabledSources.length > 1 ? enabledSources.join(' + ') : enabledSources[0];
     this._updateStatus(statusCallback, `Opening ${searchUrls.length} search tabs (${sourceLabel})...`, 'info');
 
     // Open all search tabs
