@@ -10,6 +10,7 @@
     "test:urls": "node test-auth-urls.js",
     "install:playwright": "npx playwright install chrome",
     "build": "tsc",
+    "server": "ts-node src/server.ts",
     "test:familysearch": "ts-node src/tools/familysearch.test.ts",
     "debug:familysearch": "ts-node src/tools/familysearch-debug.ts"
   },

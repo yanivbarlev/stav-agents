@@ -79,6 +79,21 @@ npm run test:familysearch
 npm run test:hebrew
 ```
 
+## Configuration - IMPORTANT
+
+**Backend URL is defined in ONE place only:** `extension/config.js`
+
+```javascript
+export const CONFIG = {
+  BACKEND_URL: 'http://localhost:3002',  // <-- Change port here only!
+  ...
+};
+```
+
+- Server port: `src/server.ts` uses `PORT` env var, defaults to 3002
+- Extension: `BackendAPI.js` imports from `config.js`
+- **NEVER hardcode URLs** in popup.js or other files
+
 ## Key Technical Concepts
 
 ### 1. Hebrew Name Handling

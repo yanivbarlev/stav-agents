@@ -13,7 +13,7 @@ import { collectFormParams, populateFormFields } from './utils/formUtils.js';
 
 // Initialize services
 const state = new SearchState();
-const api = new BackendAPI('http://localhost:3000');
+const api = new BackendAPI(); // Uses CONFIG.BACKEND_URL from config.js
 const chromeAPI = new ChromeExtensionAPI();
 const orchestrator = new SearchOrchestrator(chromeAPI);
 const ui = new PopupUI();

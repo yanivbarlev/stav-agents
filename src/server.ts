@@ -11,6 +11,7 @@ import express from 'express';
 import cors from 'cors';
 import Groq from 'groq-sdk';
 import * as dotenv from 'dotenv';
+import https from 'https';
 
 dotenv.config();
 
@@ -103,13 +104,18 @@ app.post('/api/variants', async (req, res) => {
       lastNamePrimary?: string;
     } = {};
 
-    if (firstNameHebrew) {
+    // Generate variants for both names in a single API call when both are provided
+    if (firstNameHebrew && lastNameHebrew) {
+      const variants = await generateBothNameVariants(firstNameHebrew, lastNameHebrew);
+      result.firstNameVariants = variants.firstNameVariants;
+      result.firstNamePrimary = variants.firstNamePrimary;
+      result.lastNameVariants = variants.lastNameVariants;
+      result.lastNamePrimary = variants.lastNamePrimary;
+    } else if (firstNameHebrew) {
       const variants = await generateNameVariants(firstNameHebrew);
       result.firstNameVariants = variants.variants;
       result.firstNamePrimary = variants.primaryVariant;
-    }
-
-    if (lastNameHebrew) {
+    } else if (lastNameHebrew) {
       const variants = await generateNameVariants(lastNameHebrew);
       result.lastNameVariants = variants.variants;
       result.lastNamePrimary = variants.primaryVariant;
@@ -492,6 +498,89 @@ interface NameVariants {
   primaryVariant: string;
 }
 
+interface BothNameVariants {
+  firstNameVariants: NameVariant[];
+  firstNamePrimary: string;
+  lastNameVariants: NameVariant[];
+  lastNamePrimary: string;
+}
+
+/**
+ * Generate English name variants for BOTH first and last names in a single API call
+ * This is more efficient than making two separate calls
+ */
+async function generateBothNameVariants(firstName: string, lastName: string): Promise<BothNameVariants> {
+  const prompt = `You are a Hebrew to English name transliteration expert. Generate English spelling variants for these Hebrew names:
+
+First Name: "${firstName}"
+Last Name: "${lastName}"
+
+For each name, provide 5-10 likely English spellings considering:
+1. Phonetic patterns (ק→K/C/Q, י→I/Y/E, ל→L, ת→T/TH, etc.)
+2. Common American spellings
+3. Different transliteration conventions
+
+Return ONLY a JSON object (no markdown):
+{
+  "firstName": {
+    "variants": [{"name": "Spelling1", "confidence": "high"}, {"name": "Spelling2", "confidence": "medium"}],
+    "primaryVariant": "MostCommon"
+  },
+  "lastName": {
+    "variants": [{"name": "Spelling1", "confidence": "high"}, {"name": "Spelling2", "confidence": "medium"}],
+    "primaryVariant": "MostCommon"
+  }
+}`;
+
+  try {
+    console.log('[API] Generating variants for both names:', firstName, lastName);
+
+    const completion = await groq.chat.completions.create({
+      messages: [{ role: "user", content: prompt }],
+      model: "compound-beta",
+      temperature: 0.3,
+      max_tokens: 800
+    });
+
+    let responseContent = completion.choices[0]?.message?.content;
+    if (!responseContent) {
+      throw new Error('No response from Groq API');
+    }
+
+    // Remove markdown code blocks if present
+    if (responseContent.includes('```')) {
+      responseContent = responseContent.replace(/```(?:json)?\n?/g, '').replace(/\n?```/g, '').trim();
+    }
+
+    console.log('[API] Groq compound-beta response:', responseContent.substring(0, 300));
+    const parsed = JSON.parse(responseContent);
+
+    const parseVariants = (data: any): NameVariant[] => {
+      if (!data?.variants || !Array.isArray(data.variants)) return [];
+      return data.variants.map((v: any, i: number) => ({
+        name: typeof v === 'string' ? v : v.name,
+        confidence: typeof v === 'string' ? (i < 2 ? 'high' : i < 5 ? 'medium' : 'low') : v.confidence
+      }));
+    };
+
+    return {
+      firstNameVariants: parseVariants(parsed.firstName),
+      firstNamePrimary: parsed.firstName?.primaryVariant || parsed.firstName?.variants?.[0]?.name || firstName,
+      lastNameVariants: parseVariants(parsed.lastName),
+      lastNamePrimary: parsed.lastName?.primaryVariant || parsed.lastName?.variants?.[0]?.name || lastName
+    };
+  } catch (error) {
+    console.error('[API] Error calling Groq compound-beta:', error instanceof Error ? error.message : error);
+    // Fallback
+    return {
+      firstNameVariants: [{ name: firstName, confidence: 'high' }],
+      firstNamePrimary: firstName,
+      lastNameVariants: [{ name: lastName, confidence: 'high' }],
+      lastNamePrimary: lastName
+    };
+  }
+}
+
 /**
  * Generate English name variants from Hebrew using Groq API
  */
@@ -520,7 +609,6 @@ Return ONLY a JSON object in this exact format (no markdown, no explanation):
 }
 
 Order variants from most plausible to least plausible.
-Confidence levels: "high" (very common), "medium" (possible), "low" (rare but valid).
 Include 5-10 variants total.`
     : `You are a name spelling variation expert. Given the English name "${inputName}", generate 5-10 common spelling variations and alternative forms.
 
@@ -543,29 +631,30 @@ Return ONLY a JSON object in this exact format (no markdown, no explanation):
 }
 
 IMPORTANT: ALWAYS include the original spelling "${inputName}" as the first variant with high confidence.
-Order other variants from most common to least common.
-Confidence levels: "high" (very common), "medium" (possible), "low" (rare but valid).
 Include 5-10 variants total including the original.`;
 
   try {
+    console.log('[API] Generating variants for:', inputName, '(Hebrew:', isHebrew, ')');
+
     const completion = await groq.chat.completions.create({
-      messages: [
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
-      model: "llama-3.3-70b-versatile",
+      messages: [{ role: "user", content: prompt }],
+      model: "compound-beta",
       temperature: 0.3,
-      max_tokens: 500,
-      response_format: { type: "json_object" }
+      max_tokens: 500
     });
 
-    const responseContent = completion.choices[0]?.message?.content;
+    let responseContent = completion.choices[0]?.message?.content;
 
     if (!responseContent) {
       throw new Error('No response from Groq API');
     }
+
+    // Remove markdown code blocks if present
+    if (responseContent.includes('```')) {
+      responseContent = responseContent.replace(/```(?:json)?\n?/g, '').replace(/\n?```/g, '').trim();
+    }
+
+    console.log('[API] Groq compound-beta response for', inputName, ':', responseContent.substring(0, 200));
 
     const parsed = JSON.parse(responseContent);
 
@@ -591,9 +680,13 @@ Include 5-10 variants total including the original.`;
       variants,
       primaryVariant: parsed.primaryVariant || variants[0]?.name || inputName
     };
-
   } catch (error) {
-    console.error('[API] Error calling Groq:', error);
+    console.error('[API] Error calling Groq compound-beta:', {
+      message: error instanceof Error ? error.message : String(error),
+      name: error instanceof Error ? error.name : 'unknown',
+      inputName,
+      isHebrew
+    });
     // Fallback: return the input name as-is
     return {
       hebrew: inputName,

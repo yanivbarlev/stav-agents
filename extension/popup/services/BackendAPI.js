@@ -1,13 +1,16 @@
+import { CONFIG } from '../../config.js';
+
 /**
  * BackendAPI - Client for communicating with the Express backend
  * Provides a clean interface for all API calls with error handling
  */
 export class BackendAPI {
   /**
-   * @param {string} baseUrl - Base URL of the backend API
+   * @param {string} baseUrl - Base URL of the backend API (uses CONFIG.BACKEND_URL by default)
    */
-  constructor(baseUrl = 'http://localhost:3000') {
+  constructor(baseUrl = CONFIG.BACKEND_URL) {
     this.baseUrl = baseUrl;
+    console.log('[BackendAPI] Initialized with baseUrl:', this.baseUrl);
   }
 
   /**
@@ -15,18 +18,38 @@ export class BackendAPI {
    * @returns {Promise<{status: string, groqConfigured: boolean, neo4jConfigured: boolean}>}
    */
   async checkHealth() {
+    const url = `${this.baseUrl}/health`;
+    console.log('[BackendAPI] Checking health at:', url);
+
     try {
-      const response = await fetch(`${this.baseUrl}/health`);
+      console.log('[BackendAPI] Sending fetch request...');
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+      console.log('[BackendAPI] Response received, status:', response.status);
+
       if (!response.ok) {
+        console.error('[BackendAPI] Response not OK:', response.status, response.statusText);
         return {
           status: 'error',
           groqConfigured: false,
           neo4jConfigured: false
         };
       }
-      return await response.json();
+      const data = await response.json();
+      console.log('[BackendAPI] Health check success:', data);
+      return data;
     } catch (error) {
-      console.error('[BackendAPI] Health check failed:', error);
+      console.error('[BackendAPI] Health check failed:', error.name, error.message);
+      console.error('[BackendAPI] Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+        url: url
+      });
       return {
         status: 'offline',
         groqConfigured: false,
@@ -160,17 +183,27 @@ export class BackendAPI {
    * @returns {Promise<any>} Response data
    */
   async _fetch(endpoint, options = {}) {
-    const response = await fetch(this.baseUrl + endpoint, {
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      ...options
-    });
+    const url = this.baseUrl + endpoint;
+    console.log('[BackendAPI] _fetch:', options.method || 'GET', url);
 
-    if (!response.ok) {
-      throw new Error(`API error: ${response.statusText}`);
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        ...options
+      });
+
+      console.log('[BackendAPI] _fetch response:', response.status, response.statusText);
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.statusText}`);
+      }
+
+      return response.json();
+    } catch (error) {
+      console.error('[BackendAPI] _fetch error:', error.name, error.message, 'URL:', url);
+      throw error;
     }
-
-    return response.json();
   }
 }
