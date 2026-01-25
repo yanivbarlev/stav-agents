@@ -181,7 +181,7 @@ function renderHeader(person) {
   // Source tags
   const sourceTagsContainer = document.getElementById('source-tags');
   const sourceTag = person.sourceTag || 'FS';
-  const tagClass = sourceTag === 'FS+MH' ? 'both' : sourceTag === 'MH' ? 'mh' : 'fs';
+  const tagClass = getSourceTagClass(sourceTag);
   sourceTagsContainer.innerHTML = `<span class="source-tag ${tagClass}">${sourceTag}</span>`;
 
   // Enrichment status badge
@@ -251,7 +251,7 @@ function renderFieldWithSource(elementId, value, source, alternatives) {
 
   // Add source indicator
   if (source) {
-    const shortSource = source === 'FamilySearch' ? 'FS' : source === 'MyHeritage' ? 'MH' : source;
+    const shortSource = getShortSourceName(source);
     html += ` <span class="source-indicator ${shortSource.toLowerCase()}">${shortSource}</span>`;
   }
 
@@ -260,7 +260,7 @@ function renderFieldWithSource(elementId, value, source, alternatives) {
     html += ` <button class="alternatives-btn" data-field="${elementId}">+${alternatives.length}</button>`;
     html += `<div class="alternatives-panel hidden" id="alt-${elementId}">`;
     alternatives.forEach(alt => {
-      const altSource = alt.source === 'FamilySearch' ? 'FS' : alt.source === 'MyHeritage' ? 'MH' : alt.source;
+      const altSource = getShortSourceName(alt.source);
       html += `<div class="alternative-item"><span class="alt-value">${alt.value}</span> <span class="alt-source">${altSource}</span></div>`;
     });
     html += `</div>`;
@@ -367,7 +367,7 @@ function renderFamilyList(elementId, members, memberClass) {
       let sourceIndicators = '';
       if (sourceRefs.length > 0) {
         sourceIndicators = sourceRefs.map(ref => {
-          const shortRef = ref === 'FamilySearch' ? 'FS' : ref === 'MyHeritage' ? 'MH' : ref;
+          const shortRef = getShortSourceName(ref);
           return `<span class="source-indicator ${shortRef.toLowerCase()}">${shortRef}</span>`;
         }).join('');
       }
@@ -423,7 +423,7 @@ function renderAddresses(person) {
 
   card.classList.remove('hidden');
   container.innerHTML = person.addresses.map(addr => {
-    const sourceShort = addr.source === 'FamilySearch' ? 'FS' : addr.source === 'MyHeritage' ? 'MH' : addr.source || '';
+    const sourceShort = getShortSourceName(addr.source);
     return `
       <div class="address-item">
         <span class="address-text">${addr.address || addr}</span>
@@ -449,7 +449,7 @@ function renderOccupations(person) {
 
   card.classList.remove('hidden');
   container.innerHTML = person.occupations.map(occ => {
-    const sourceShort = occ.source === 'FamilySearch' ? 'FS' : occ.source === 'MyHeritage' ? 'MH' : occ.source || '';
+    const sourceShort = getShortSourceName(occ.source);
     return `
       <div class="occupation-item">
         <span class="occupation-text">${occ.occupation || occ}</span>
@@ -505,10 +505,13 @@ function renderFooter(person) {
 
   // Add source links (with English language for FamilySearch)
   if (person.sources && person.sources.length > 0) {
+    // Deduplicate by source name
+    const seenSources = new Set();
     person.sources.forEach(source => {
-      if (source.url) {
+      if (source.url && !seenSources.has(source.name)) {
+        seenSources.add(source.name);
         const displayUrl = ensureEnglishUrl(source.url);
-        const btnClass = source.name === 'MyHeritage' ? 'btn-source mh' : 'btn-source';
+        const btnClass = getSourceButtonClass(source.name);
         links.push(`
           <a href="${displayUrl}" target="_blank" class="btn ${btnClass}">
             Open in ${source.name}
@@ -577,4 +580,41 @@ function ensureEnglishUrl(url) {
     }
     return url + '?lang=en';
   }
+}
+
+/**
+ * Get short source name for display
+ * @param {string} source - Full source name
+ * @returns {string} Short source name (FS, MH, AN, or original)
+ */
+function getShortSourceName(source) {
+  if (!source) return '';
+  if (source === 'FamilySearch') return 'FS';
+  if (source === 'MyHeritage') return 'MH';
+  if (source === 'Ancestry') return 'AN';
+  return source;
+}
+
+/**
+ * Get CSS class for source tag
+ * @param {string} sourceTag - Source tag string (e.g., 'FS', 'MH', 'AN', 'FS+MH+AN')
+ * @returns {string} CSS class name
+ */
+function getSourceTagClass(sourceTag) {
+  if (!sourceTag) return 'fs';
+  if (sourceTag.includes('+')) return 'multi';
+  if (sourceTag === 'AN') return 'an';
+  if (sourceTag === 'MH') return 'mh';
+  return 'fs';
+}
+
+/**
+ * Get CSS class for source button
+ * @param {string} sourceName - Source name
+ * @returns {string} CSS class string
+ */
+function getSourceButtonClass(sourceName) {
+  if (sourceName === 'MyHeritage') return 'btn-source mh';
+  if (sourceName === 'Ancestry') return 'btn-source an';
+  return 'btn-source';
 }

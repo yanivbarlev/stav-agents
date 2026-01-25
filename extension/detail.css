@@ -92,6 +92,18 @@ body {
   border: 1px solid #a855f7;
 }
 
+.source-tag.an {
+  background: linear-gradient(135deg, #a16207 0%, #ca8a04 100%);
+  color: #fef9c3;
+  border: 1px solid #eab308;
+}
+
+.source-tag.multi {
+  background: linear-gradient(135deg, #6b21a8 0%, #7c3aed 100%);
+  color: #e9d5ff;
+  border: 1px solid #a855f7;
+}
+
 .header-actions {
   display: flex;
   gap: 12px;
@@ -147,6 +159,10 @@ body {
 
 .btn-source.mh {
   background: linear-gradient(135deg, #0369a1 0%, #0ea5e9 100%);
+}
+
+.btn-source.an {
+  background: linear-gradient(135deg, #a16207 0%, #eab308 100%);
 }
 
 /* ============================================================================
@@ -616,6 +632,12 @@ body {
   background: rgba(59, 130, 246, 0.2);
   color: #60a5fa;
   border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.source-indicator.an {
+  background: rgba(234, 179, 8, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(234, 179, 8, 0.3);
 }
 
 /* Alternatives Button & Panel */
