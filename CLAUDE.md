@@ -360,19 +360,166 @@ Currently integrated sources:
 - **MyHeritage** (myheritage.com/myheritage.co.il) - Requires paid account
 - **Ancestry** (ancestry.com) - Requires paid account
 
-### Adding a New Data Source
+### Adding a New Data Source - COMPLETE CHECKLIST
 
-To add a new genealogy source:
-1. Create new content script: `extension/content/[source].js`
-2. Add to `manifest.json`:
-   - Add URL to `host_permissions`
-   - Add content_scripts entry with URL pattern
-3. Implement message handlers: `ping`, `checkLogin`, `extractResults`, `extractFamilyFromDetailPage`
-4. Update `extension/popup/utils/urlBuilder.js`:
-   - Add source to `SOURCES` constant
-   - Create `build[Source]SearchUrl()` function
-   - Update `buildSearchUrlPermutations()` and `buildMultiSourceSearchUrls()`
-5. Update `extension/popup/utils/contentScriptInjector.js`: Add URL detection in `getScriptPathForUrl()`
-6. Update `extension/popup/services/SearchOrchestrator.js`: Add source detection and ID handling
-7. Update `extension/popup/services/EnrichmentService.js`: Add source URL detection
-8. Test extraction independently before integrating
+**⚠️ CRITICAL: This checklist exists because we spent 6 hours debugging an "extraction not working" issue that turned out to be purely a UI display problem. The extraction was working perfectly - the UI just wasn't showing the results.**
+
+When adding a new genealogy source, you MUST update ALL of these files:
+
+#### Phase 1: Backend/Extraction (Makes data available)
+- [ ] Create new content script: `extension/content/[source].js`
+- [ ] Add to `manifest.json`:
+  - Add URL to `host_permissions`
+  - Add content_scripts entry with URL pattern
+- [ ] Implement message handlers: `ping`, `checkLogin`, `extractResults`, `extractFamilyFromDetailPage`
+- [ ] Update `extension/popup/utils/urlBuilder.js`:
+  - Add source to `SOURCES` constant
+  - Create `build[Source]SearchUrl()` function
+  - Update `buildSearchUrlPermutations()` and `buildMultiSourceSearchUrls()`
+- [ ] Update `extension/popup/utils/contentScriptInjector.js`: Add URL detection in `getScriptPathForUrl()`
+- [ ] Update `extension/popup/services/SearchOrchestrator.js`: Add source detection and ID handling
+- [ ] Update `extension/popup/services/EnrichmentService.js`: Add source URL detection
+
+#### Phase 2: UI Display (Makes data VISIBLE) - **OFTEN FORGOTTEN!**
+- [ ] Update `extension/popup/components/PopupUI.js`:
+  - `_getSourceTagClass()` - Add CSS class for new source tag
+  - `_generateResultSourceLinks()` - Add "View on [Source]" link generation
+  - `_generateSourceRows()` - Add source ID label (e.g., "AN ID" for Ancestry)
+  - `displayResults()` - Verify sourceTag handling includes new source
+- [ ] Update `extension/popup/popup.css`:
+  - `.source-tag.[source]` - Add color scheme for source badge
+  - `.result-link.[source]-link` - Add link color
+  - `.result-source-id.[source]` - Add border color for IDs
+  - `.source-tag.multi` - Ensure multi-source combinations are styled
+
+#### Phase 3: Testing & Verification
+- [ ] Use debug logging (Export Debug Log button) to verify extraction works
+- [ ] Check that results appear in UI with correct source tags
+- [ ] Verify "View on [Source]" links work
+- [ ] Test multi-source deduplication (same person from multiple sources)
+
+---
+
+## Debugging Guide
+
+### The "Invisible Data" Bug Pattern
+
+**Symptom**: "No results from [Source]" but extraction logs show data was extracted successfully.
+
+**Root Cause**: Data flows through multiple layers, and the UI layer has hardcoded handling for specific sources:
+
+```
+Content Script → SearchOrchestrator → popup.js → PopupUI → CSS
+     ✓                  ✓                ✓          ✗        ✗
+   (extracts)      (processes)      (passes)   (doesn't    (no
+                                               display)   styles)
+```
+
+**The Ancestry Bug (January 2025)**: We added Ancestry extraction which worked perfectly (13 results extracted). But `PopupUI.js` only handled FamilySearch and MyHeritage:
+- Source tags defaulted to 'fs' class (green) instead of showing 'AN' (gold)
+- Links showed "View on MyHeritage" instead of "View on Ancestry"
+- Results WERE in the data but visually appeared as other sources
+
+**How We Found It**: Added comprehensive debug logging that showed:
+```
+[PopupUI] Displaying result 2:
+  Data: {
+    "fullName": "Isaac Sobiborsky",
+    "source": "Ancestry",        ← Correct!
+    "sourceTag": "AN",           ← Correct!
+    "hasAncestryId": true,       ← Correct!
+    "sourcesArray": ["Ancestry", "Ancestry"]  ← Data is there!
+  }
+```
+
+The data was correct, but the UI code wasn't handling the "Ancestry" case.
+
+### Debug Logging System
+
+The extension includes a built-in debug logging system:
+
+**Location**: `extension/popup/utils/debugLogger.js`
+
+**Usage**:
+```javascript
+import { debugLogger } from '../utils/debugLogger.js';
+
+debugLogger.log('ComponentName', 'What happened', { optional: 'data' });
+debugLogger.error('ComponentName', 'Error message', errorObject);
+```
+
+**Export**: Click "Export Debug Log" button in footer to download timestamped log file.
+
+**What's Logged**:
+- Search start with parameters
+- Each tab opened and its source
+- Content script ping attempts and responses
+- Extraction results from each tab (with full person data)
+- Deduplication decisions
+- Final output before display
+- What PopupUI receives and displays
+
+### Debugging Checklist
+
+When something "isn't working", check in this order:
+
+1. **Export Debug Log** - First step, always
+2. **Check extraction section** - Look for `extractResults returned X persons`
+3. **Check person data** - Are `source`, `sourceTag`, `ancestryId`/`mhId`/`fsId` correct?
+4. **Check final output** - Does "FINAL OUTPUT" section show the data?
+5. **Check PopupUI display** - Does "DISPLAY RESULTS" show correct source info?
+6. **If data is correct but not visible** → UI display bug, not extraction bug
+
+### Common Debugging Scenarios
+
+| Symptom | Likely Cause | Check |
+|---------|--------------|-------|
+| No results at all | Content script not loaded | Debug log: "Ping attempt" entries |
+| Results missing from one source | Extraction failed or UI not displaying | Debug log: extraction section for that source |
+| Wrong source shown | UI hardcoded for other sources | PopupUI.js source handling code |
+| Results appear but look wrong | CSS missing for source | popup.css source tag classes |
+| "View on X" links wrong | Link generation hardcoded | `_generateResultSourceLinks()` |
+
+---
+
+## Post-Mortem: The 6-Hour Ancestry Bug
+
+**Date**: January 2025
+
+**Time Spent**: 6 hours
+
+**Initial Assumption**: Ancestry content script extraction was broken.
+
+**What We Tried**:
+1. Verified CSS selectors on Ancestry pages (they worked)
+2. Added console logging to content script (extraction worked)
+3. Tested content script manually (results returned)
+4. Added debug logging throughout the pipeline
+
+**What We Found**: The debug log clearly showed:
+- Ancestry tab responded to ping ✓
+- `extractResults` returned 13 persons ✓
+- All person objects had correct `ancestryId`, `source: "Ancestry"` ✓
+- Final output included Ancestry results ✓
+- PopupUI received the data ✓
+
+**The Actual Bug**: `PopupUI.js` had hardcoded source handling:
+```javascript
+// OLD - Only handled FS and MH
+const sourceTagClass = person.sourceTag === 'FS+MH' ? 'both' :
+                       person.sourceTag === 'MH' ? 'mh' : 'fs';
+// Ancestry results got 'fs' class and appeared as FamilySearch!
+```
+
+**The Fix**: Added proper source handling for Ancestry and multi-source combinations:
+```javascript
+// NEW - Handle all sources
+_getSourceTagClass(sourceTag) {
+  if (sourceTag?.includes('+')) return 'multi';
+  if (sourceTag === 'AN') return 'an';
+  if (sourceTag === 'MH') return 'mh';
+  return 'fs';
+}
+```
+
+**Lesson**: When adding a new data source, the UI layer (PopupUI.js, popup.css) is just as critical as the extraction layer. Always update BOTH.
