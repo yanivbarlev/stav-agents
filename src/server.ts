@@ -12,15 +12,14 @@ import cors from 'cors';
 import Groq from 'groq-sdk';
 import * as dotenv from 'dotenv';
 
-// Load environment variables
 dotenv.config();
 
-// Import Neo4j components
 import { neo4jConnection } from './db/neo4j-connection';
 import { personService } from './db/services/person.service';
 import { matchingService } from './db/services/matching.service';
 import { mergeService } from './db/services/merge.service';
 import { ExtractedPersonInput } from './db/models/person.model';
+import { handleApiError, sendErrorResponse } from './utils/api-helpers';
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -94,9 +93,7 @@ app.post('/api/variants', async (req, res) => {
     const { firstNameHebrew, lastNameHebrew } = req.body;
 
     if (!firstNameHebrew && !lastNameHebrew) {
-      return res.status(400).json({
-        error: 'At least one Hebrew name is required'
-      });
+      return sendErrorResponse(res, 400, 'At least one Hebrew name is required');
     }
 
     const result: {
@@ -106,14 +103,12 @@ app.post('/api/variants', async (req, res) => {
       lastNamePrimary?: string;
     } = {};
 
-    // Generate first name variants
     if (firstNameHebrew) {
       const variants = await generateNameVariants(firstNameHebrew);
       result.firstNameVariants = variants.variants;
       result.firstNamePrimary = variants.primaryVariant;
     }
 
-    // Generate last name variants
     if (lastNameHebrew) {
       const variants = await generateNameVariants(lastNameHebrew);
       result.lastNameVariants = variants.variants;
@@ -122,13 +117,8 @@ app.post('/api/variants', async (req, res) => {
 
     console.log(`[API] Generated variants:`, result);
     res.json(result);
-
   } catch (error) {
-    console.error('[API] Error generating variants:', error);
-    res.status(500).json({
-      error: 'Failed to generate name variants',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    handleApiError(res, 'generate name variants', error);
   }
 });
 
@@ -142,14 +132,11 @@ app.post('/api/persons', async (req, res) => {
     const { persons, searchParams } = req.body;
 
     if (!persons || !Array.isArray(persons)) {
-      return res.status(400).json({
-        error: 'persons array is required'
-      });
+      return sendErrorResponse(res, 400, 'persons array is required');
     }
 
     console.log(`[API] Received ${persons.length} persons to save`);
 
-    // Convert to ExtractedPersonInput format
     const extractedPersons: ExtractedPersonInput[] = persons.map((p: any) => ({
       fsId: p.fsId,
       fullName: p.fullName,
@@ -174,7 +161,6 @@ app.post('/api/persons', async (req, res) => {
       events: p.events,
     }));
 
-    // Save to Neo4j using person service
     const result = await personService.saveBulkExtractedPersons(extractedPersons, 'FamilySearch');
 
     console.log(`[API] Saved ${result.saved} persons, merged ${result.matched}, errors: ${result.errors}`);
@@ -192,13 +178,8 @@ app.post('/api/persons', async (req, res) => {
         birthPlace: p.birthPlace,
       }))
     });
-
   } catch (error) {
-    console.error('[API] Error saving persons:', error);
-    res.status(500).json({
-      error: 'Failed to save persons',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    handleApiError(res, 'save persons', error);
   }
 });
 
@@ -270,11 +251,7 @@ app.get('/api/persons/:personId', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('[API] Error fetching person:', error);
-    res.status(500).json({
-      error: 'Failed to fetch person',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    handleApiError(res, 'fetch person', error);
   }
 });
 
@@ -285,26 +262,15 @@ app.get('/api/persons/:personId', async (req, res) => {
 app.get('/api/persons/:personId/family', async (req, res) => {
   try {
     const { personId } = req.params;
-
     const family = await personService.getFamily(personId);
 
     if (!family) {
-      return res.status(404).json({
-        error: 'Person not found'
-      });
+      return sendErrorResponse(res, 404, 'Person not found');
     }
 
-    res.json({
-      success: true,
-      ...family
-    });
-
+    res.json({ success: true, ...family });
   } catch (error) {
-    console.error('[API] Error fetching family:', error);
-    res.status(500).json({
-      error: 'Failed to fetch family',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    handleApiError(res, 'fetch family', error);
   }
 });
 
@@ -317,17 +283,12 @@ app.post('/api/matching/find', async (req, res) => {
     const { personId, useAllData = true, minConfidence = 0.7 } = req.body;
 
     if (!personId) {
-      return res.status(400).json({
-        error: 'personId is required'
-      });
+      return sendErrorResponse(res, 400, 'personId is required');
     }
 
     const person = await personService.getPersonById(personId);
-
     if (!person) {
-      return res.status(404).json({
-        error: 'Person not found'
-      });
+      return sendErrorResponse(res, 404, 'Person not found');
     }
 
     const matches = await matchingService.findMatches({
@@ -350,13 +311,8 @@ app.post('/api/matching/find', async (req, res) => {
         matchReason: m.matchReason,
       }))
     });
-
   } catch (error) {
-    console.error('[API] Error finding matches:', error);
-    res.status(500).json({
-      error: 'Failed to find matches',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    handleApiError(res, 'find matches', error);
   }
 });
 
@@ -369,9 +325,7 @@ app.post('/api/matching/merge', async (req, res) => {
     const { primaryPersonId, secondaryPersonId } = req.body;
 
     if (!primaryPersonId || !secondaryPersonId) {
-      return res.status(400).json({
-        error: 'primaryPersonId and secondaryPersonId are required'
-      });
+      return sendErrorResponse(res, 400, 'primaryPersonId and secondaryPersonId are required');
     }
 
     const result = await mergeService.mergePersons(primaryPersonId, secondaryPersonId);
@@ -387,13 +341,8 @@ app.post('/api/matching/merge', async (req, res) => {
       fieldsFromSecondary: result.fieldsFromSecondary,
       conflictsResolved: result.conflictsResolved.length,
     });
-
   } catch (error) {
-    console.error('[API] Error merging persons:', error);
-    res.status(500).json({
-      error: 'Failed to merge persons',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    handleApiError(res, 'merge persons', error);
   }
 });
 
@@ -464,13 +413,8 @@ app.post('/api/matching/deduplicate', async (req, res) => {
       merged: merged.length,
       suggestions,
     });
-
   } catch (error) {
-    console.error('[API] Error during deduplication:', error);
-    res.status(500).json({
-      error: 'Failed to run deduplication',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    handleApiError(res, 'run deduplication', error);
   }
 });
 
@@ -484,7 +428,6 @@ app.delete('/api/persons/:id', async (req, res) => {
 
     const session = neo4jConnection.getSession();
     try {
-      // Delete the person and all their relationships
       await session.run(`
         MATCH (p:Person {personId: $personId})
         DETACH DELETE p
@@ -494,13 +437,8 @@ app.delete('/api/persons/:id', async (req, res) => {
     } finally {
       await session.close();
     }
-
   } catch (error) {
-    console.error('[API] Error deleting person:', error);
-    res.status(500).json({
-      error: 'Failed to delete person',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    handleApiError(res, 'delete person', error);
   }
 });
 
@@ -514,27 +452,15 @@ app.post('/api/analyze-person', async (req, res) => {
     const { personName, rawPageText, source } = req.body;
 
     if (!personName || !rawPageText) {
-      return res.status(400).json({
-        error: 'personName and rawPageText are required'
-      });
+      return sendErrorResponse(res, 400, 'personName and rawPageText are required');
     }
 
     console.log(`[API] Analyzing details for: ${personName} (${source})`);
-
     const analysis = await analyzePersonDetails(personName, rawPageText, source);
 
-    res.json({
-      success: true,
-      personName,
-      analysis
-    });
-
+    res.json({ success: true, personName, analysis });
   } catch (error) {
-    console.error('[API] Error analyzing person:', error);
-    res.status(500).json({
-      error: 'Failed to analyze person details',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    handleApiError(res, 'analyze person details', error);
   }
 });
 
@@ -545,18 +471,9 @@ app.post('/api/analyze-person', async (req, res) => {
 app.get('/api/stats', async (req, res) => {
   try {
     const stats = await neo4jConnection.getStats();
-
-    res.json({
-      success: true,
-      ...stats
-    });
-
+    res.json({ success: true, ...stats });
   } catch (error) {
-    console.error('[API] Error fetching stats:', error);
-    res.status(500).json({
-      error: 'Failed to fetch stats',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
+    handleApiError(res, 'fetch stats', error);
   }
 });
 

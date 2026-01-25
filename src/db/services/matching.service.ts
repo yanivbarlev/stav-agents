@@ -8,6 +8,7 @@
 import { neo4jConnection } from '../neo4j-connection';
 import { PersonRepository, personRepository } from '../repositories/person.repository';
 import { PersonNode } from '../models/person.model';
+import { nodeToPersonNode, withSession } from '../utils/neo4j-utils';
 import {
   PersonMatch,
   MatchedField,
@@ -208,18 +209,12 @@ export class MatchingService {
     person: PersonNode,
     excludeIds: Set<string>
   ): Promise<PersonMatch[]> {
-    const matches: PersonMatch[] = [];
-    const session = neo4jConnection.getSession();
+    const parents = await this.repo.getParents(person.personId);
+    if (parents.length === 0) return [];
 
-    try {
-      // Get person's parents
-      const parents = await this.repo.getParents(person.personId);
+    const parentNames = parents.map(p => p.person.primaryName.toLowerCase());
 
-      if (parents.length === 0) return matches;
-
-      // Query for persons with similar parent names
-      const parentNames = parents.map(p => p.person.primaryName.toLowerCase());
-
+    return withSession(async (session) => {
       const query = `
         MATCH (p:Person)-[:CHILD_OF]->(parent:Person)
         WHERE (p.merged IS NULL OR p.merged = false)
@@ -234,8 +229,10 @@ export class MatchingService {
         parentNames,
       });
 
+      const matches: PersonMatch[] = [];
+
       for (const record of result.records) {
-        const candidate = this.nodeToPersonNode(record.get('p'));
+        const candidate = nodeToPersonNode(record.get('p'));
 
         if (excludeIds.has(candidate.personId)) continue;
 
@@ -250,11 +247,8 @@ export class MatchingService {
         }
       }
 
-    } finally {
-      await session.close();
-    }
-
-    return matches;
+      return matches;
+    });
   }
 
   // ==========================================================================
@@ -269,18 +263,12 @@ export class MatchingService {
     person: PersonNode,
     excludeIds: Set<string>
   ): Promise<PersonMatch[]> {
-    const matches: PersonMatch[] = [];
-    const session = neo4jConnection.getSession();
+    const siblings = await this.repo.getSiblings(person.personId);
+    if (siblings.length === 0) return [];
 
-    try {
-      // Get person's siblings
-      const siblings = await this.repo.getSiblings(person.personId);
+    const siblingIds = siblings.map(s => s.person.personId);
 
-      if (siblings.length === 0) return matches;
-
-      const siblingIds = siblings.map(s => s.person.personId);
-
-      // Find other persons who share these siblings
+    return withSession(async (session) => {
       const query = `
         MATCH (p:Person)-[:SIBLING_OF]-(sibling:Person)
         WHERE (p.merged IS NULL OR p.merged = false)
@@ -296,15 +284,16 @@ export class MatchingService {
         siblingIds,
       });
 
+      const matches: PersonMatch[] = [];
+
       for (const record of result.records) {
-        const candidate = this.nodeToPersonNode(record.get('p'));
+        const candidate = nodeToPersonNode(record.get('p'));
         const sharedSiblings = record.get('sharedSiblings').toNumber();
 
         if (excludeIds.has(candidate.personId)) continue;
 
         const match = this.calculateMatch(person, candidate, MatchLevel.FAMILY_CONTEXT);
 
-        // Boost confidence based on shared siblings
         const siblingBoost = Math.min(0.2, sharedSiblings * 0.05);
         match.confidence = Math.min(1, match.confidence + siblingBoost);
 
@@ -313,11 +302,8 @@ export class MatchingService {
         }
       }
 
-    } finally {
-      await session.close();
-    }
-
-    return matches;
+      return matches;
+    });
   }
 
   // ==========================================================================
@@ -621,36 +607,6 @@ export class MatchingService {
     return Array.from(merged.values());
   }
 
-  // ==========================================================================
-  // HELPERS
-  // ==========================================================================
-
-  /**
-   * Convert Neo4j node to PersonNode
-   */
-  private nodeToPersonNode(node: any): PersonNode {
-    const props = node.properties;
-
-    return {
-      personId: props.personId,
-      primaryName: props.primaryName,
-      firstNames: props.firstNames || [],
-      lastNames: props.lastNames || [],
-      hebrewFirstName: props.hebrewFirstName || undefined,
-      hebrewLastName: props.hebrewLastName || undefined,
-      birthDateText: props.birthDateText || undefined,
-      birthPlace: props.birthPlace || undefined,
-      deathDateText: props.deathDateText || undefined,
-      deathPlace: props.deathPlace || undefined,
-      sex: props.sex || undefined,
-      createdAt: props.createdAt ? new Date(props.createdAt) : new Date(),
-      updatedAt: props.updatedAt ? new Date(props.updatedAt) : new Date(),
-      confidence: typeof props.confidence === 'number' ? props.confidence : 0.7,
-      notes: props.notes || undefined,
-      merged: props.merged || false,
-      mergedInto: props.mergedInto || undefined,
-    };
-  }
 }
 
 // Export singleton instance

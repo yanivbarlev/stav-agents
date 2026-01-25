@@ -8,6 +8,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import neo4j from 'neo4j-driver';
 import { neo4jConnection } from '../neo4j-connection';
+import { nodeToPersonNode, withSession } from '../utils/neo4j-utils';
 import {
   PersonNode,
   Person,
@@ -33,9 +34,7 @@ export class PersonRepository {
    * Create a new person node
    */
   async createPerson(input: PersonCreateInput): Promise<PersonNode> {
-    const session = neo4jConnection.getSession();
-
-    try {
+    return withSession(async (session) => {
       const personId = uuidv4();
       const now = new Date().toISOString();
       const primaryName = `${input.firstName} ${input.lastName}`.trim();
@@ -76,15 +75,12 @@ export class PersonRepository {
         sex: this.normalizeSex(input.sex),
         createdAt: now,
         updatedAt: now,
-        confidence: 0.7, // Default confidence
+        confidence: 0.7,
         notes: input.notes || null,
       });
 
-      return this.nodeToPersonNode(result.records[0].get('p'));
-
-    } finally {
-      await session.close();
-    }
+      return nodeToPersonNode(result.records[0].get('p'));
+    });
   }
 
   // ==========================================================================
@@ -95,9 +91,7 @@ export class PersonRepository {
    * Find person by internal ID
    */
   async findById(personId: string): Promise<PersonNode | null> {
-    const session = neo4jConnection.getSession();
-
-    try {
+    return withSession(async (session) => {
       const query = `
         MATCH (p:Person {personId: $personId})
         WHERE p.merged IS NULL OR p.merged = false
@@ -110,20 +104,15 @@ export class PersonRepository {
         return null;
       }
 
-      return this.nodeToPersonNode(result.records[0].get('p'));
-
-    } finally {
-      await session.close();
-    }
+      return nodeToPersonNode(result.records[0].get('p'));
+    });
   }
 
   /**
    * Find person by external source ID (e.g., FamilySearch ID)
    */
   async findByExternalId(sourceName: string, externalId: string): Promise<PersonNode | null> {
-    const session = neo4jConnection.getSession();
-
-    try {
+    return withSession(async (session) => {
       const query = `
         MATCH (p:Person)-[:EXTRACTED_FROM]->(s:Source {sourceName: $sourceName, externalId: $externalId})
         WHERE p.merged IS NULL OR p.merged = false
@@ -137,58 +126,43 @@ export class PersonRepository {
         return null;
       }
 
-      return this.nodeToPersonNode(result.records[0].get('p'));
-
-    } finally {
-      await session.close();
-    }
+      return nodeToPersonNode(result.records[0].get('p'));
+    });
   }
 
   /**
    * Get person with all relationships (full Person object)
    */
   async getPersonWithRelationships(personId: string): Promise<Person | null> {
-    const session = neo4jConnection.getSession();
+    const personNode = await this.findById(personId);
+    if (!personNode) return null;
 
-    try {
-      // Get person node
-      const personNode = await this.findById(personId);
-      if (!personNode) return null;
+    const [sources, parents, children, siblings, spouses] = await Promise.all([
+      this.getPersonSources(personId),
+      this.getParents(personId),
+      this.getChildren(personId),
+      this.getSiblings(personId),
+      this.getSpouses(personId),
+    ]);
 
-      // Get all relationships in parallel queries
-      const [sources, parents, children, siblings, spouses] = await Promise.all([
-        this.getPersonSources(personId),
-        this.getParents(personId),
-        this.getChildren(personId),
-        this.getSiblings(personId),
-        this.getSpouses(personId),
-      ]);
-
-      return {
-        ...personNode,
-        sources,
-        parents,
-        children,
-        siblings,
-        spouses,
-      };
-
-    } finally {
-      await session.close();
-    }
+    return {
+      ...personNode,
+      sources,
+      parents,
+      children,
+      siblings,
+      spouses,
+    };
   }
 
   /**
    * Search for persons by various criteria
    */
   async searchPersons(params: PersonSearchParams): Promise<PersonNode[]> {
-    const session = neo4jConnection.getSession();
-
-    try {
+    return withSession(async (session) => {
       const conditions: string[] = ['(p.merged IS NULL OR p.merged = false)'];
       const queryParams: any = {};
 
-      // Name search
       if (params.name) {
         conditions.push('(p.primaryName CONTAINS $name OR ANY(fn IN p.firstNames WHERE fn CONTAINS $name) OR ANY(ln IN p.lastNames WHERE ln CONTAINS $name))');
         queryParams.name = params.name;
@@ -204,7 +178,6 @@ export class PersonRepository {
         queryParams.lastName = params.lastName;
       }
 
-      // Hebrew name search
       if (params.hebrewFirstName) {
         conditions.push('p.hebrewFirstName = $hebrewFirstName');
         queryParams.hebrewFirstName = params.hebrewFirstName;
@@ -215,24 +188,18 @@ export class PersonRepository {
         queryParams.hebrewLastName = params.hebrewLastName;
       }
 
-      // Birth year search
       if (params.birthYear) {
-        const range = params.birthYearRange || 2;
         conditions.push('p.birthDateText CONTAINS toString($birthYear)');
         queryParams.birthYear = params.birthYear;
-        // Note: For more precise range matching, would need to parse dates
       }
 
-      // Birth place search
       if (params.birthPlace) {
         conditions.push('toLower(p.birthPlace) CONTAINS toLower($birthPlace)');
         queryParams.birthPlace = params.birthPlace;
       }
 
-      const limit = neo4j.int(params.limit || 50);
-      const offset = neo4j.int(params.offset || 0);
-      queryParams.limit = limit;
-      queryParams.offset = offset;
+      queryParams.limit = neo4j.int(params.limit || 50);
+      queryParams.offset = neo4j.int(params.offset || 0);
 
       const query = `
         MATCH (p:Person)
@@ -244,12 +211,8 @@ export class PersonRepository {
       `;
 
       const result = await session.run(query, queryParams);
-
-      return result.records.map(record => this.nodeToPersonNode(record.get('p')));
-
-    } finally {
-      await session.close();
-    }
+      return result.records.map(record => nodeToPersonNode(record.get('p')));
+    });
   }
 
   /**
@@ -261,14 +224,8 @@ export class PersonRepository {
     birthYear: number,
     yearTolerance: number = 2
   ): Promise<PersonNode[]> {
-    const session = neo4jConnection.getSession();
-
-    try {
-      // Build year range pattern
-      const yearStrings = [];
-      for (let y = birthYear - yearTolerance; y <= birthYear + yearTolerance; y++) {
-        yearStrings.push(String(y));
-      }
+    return withSession(async (session) => {
+      const yearStrings = this.buildYearRange(birthYear, yearTolerance);
 
       const query = `
         MATCH (p:Person)
@@ -286,17 +243,9 @@ export class PersonRepository {
         LIMIT 50
       `;
 
-      const result = await session.run(query, {
-        firstName,
-        lastName,
-        yearStrings,
-      });
-
-      return result.records.map(record => this.nodeToPersonNode(record.get('p')));
-
-    } finally {
-      await session.close();
-    }
+      const result = await session.run(query, { firstName, lastName, yearStrings });
+      return result.records.map(record => nodeToPersonNode(record.get('p')));
+    });
   }
 
   /**
@@ -308,14 +257,8 @@ export class PersonRepository {
     deathYear: number,
     yearTolerance: number = 2
   ): Promise<PersonNode[]> {
-    const session = neo4jConnection.getSession();
-
-    try {
-      // Build year range pattern
-      const yearStrings = [];
-      for (let y = deathYear - yearTolerance; y <= deathYear + yearTolerance; y++) {
-        yearStrings.push(String(y));
-      }
+    return withSession(async (session) => {
+      const yearStrings = this.buildYearRange(deathYear, yearTolerance);
 
       const query = `
         MATCH (p:Person)
@@ -333,17 +276,20 @@ export class PersonRepository {
         LIMIT 50
       `;
 
-      const result = await session.run(query, {
-        firstName,
-        lastName,
-        yearStrings,
-      });
+      const result = await session.run(query, { firstName, lastName, yearStrings });
+      return result.records.map(record => nodeToPersonNode(record.get('p')));
+    });
+  }
 
-      return result.records.map(record => this.nodeToPersonNode(record.get('p')));
-
-    } finally {
-      await session.close();
+  /**
+   * Build an array of year strings within a tolerance range
+   */
+  private buildYearRange(centerYear: number, tolerance: number): string[] {
+    const years: string[] = [];
+    for (let y = centerYear - tolerance; y <= centerYear + tolerance; y++) {
+      years.push(String(y));
     }
+    return years;
   }
 
   // ==========================================================================
@@ -354,70 +300,30 @@ export class PersonRepository {
    * Update an existing person
    */
   async updatePerson(personId: string, updates: PersonUpdateInput): Promise<PersonNode | null> {
-    const session = neo4jConnection.getSession();
-
-    try {
+    return withSession(async (session) => {
       const setClauses: string[] = ['p.updatedAt = datetime()'];
       const queryParams: any = { personId };
 
-      if (updates.primaryName !== undefined) {
-        setClauses.push('p.primaryName = $primaryName');
-        queryParams.primaryName = updates.primaryName;
-      }
+      const fieldMappings: Array<[keyof PersonUpdateInput, string]> = [
+        ['primaryName', 'p.primaryName = $primaryName'],
+        ['firstNames', 'p.firstNames = $firstNames'],
+        ['lastNames', 'p.lastNames = $lastNames'],
+        ['hebrewFirstName', 'p.hebrewFirstName = $hebrewFirstName'],
+        ['hebrewLastName', 'p.hebrewLastName = $hebrewLastName'],
+        ['birthDateText', 'p.birthDateText = $birthDateText'],
+        ['birthPlace', 'p.birthPlace = $birthPlace'],
+        ['deathDateText', 'p.deathDateText = $deathDateText'],
+        ['deathPlace', 'p.deathPlace = $deathPlace'],
+        ['sex', 'p.sex = $sex'],
+        ['confidence', 'p.confidence = $confidence'],
+        ['notes', 'p.notes = $notes'],
+      ];
 
-      if (updates.firstNames !== undefined) {
-        setClauses.push('p.firstNames = $firstNames');
-        queryParams.firstNames = updates.firstNames;
-      }
-
-      if (updates.lastNames !== undefined) {
-        setClauses.push('p.lastNames = $lastNames');
-        queryParams.lastNames = updates.lastNames;
-      }
-
-      if (updates.hebrewFirstName !== undefined) {
-        setClauses.push('p.hebrewFirstName = $hebrewFirstName');
-        queryParams.hebrewFirstName = updates.hebrewFirstName;
-      }
-
-      if (updates.hebrewLastName !== undefined) {
-        setClauses.push('p.hebrewLastName = $hebrewLastName');
-        queryParams.hebrewLastName = updates.hebrewLastName;
-      }
-
-      if (updates.birthDateText !== undefined) {
-        setClauses.push('p.birthDateText = $birthDateText');
-        queryParams.birthDateText = updates.birthDateText;
-      }
-
-      if (updates.birthPlace !== undefined) {
-        setClauses.push('p.birthPlace = $birthPlace');
-        queryParams.birthPlace = updates.birthPlace;
-      }
-
-      if (updates.deathDateText !== undefined) {
-        setClauses.push('p.deathDateText = $deathDateText');
-        queryParams.deathDateText = updates.deathDateText;
-      }
-
-      if (updates.deathPlace !== undefined) {
-        setClauses.push('p.deathPlace = $deathPlace');
-        queryParams.deathPlace = updates.deathPlace;
-      }
-
-      if (updates.sex !== undefined) {
-        setClauses.push('p.sex = $sex');
-        queryParams.sex = updates.sex;
-      }
-
-      if (updates.confidence !== undefined) {
-        setClauses.push('p.confidence = $confidence');
-        queryParams.confidence = updates.confidence;
-      }
-
-      if (updates.notes !== undefined) {
-        setClauses.push('p.notes = $notes');
-        queryParams.notes = updates.notes;
+      for (const [field, clause] of fieldMappings) {
+        if (updates[field] !== undefined) {
+          setClauses.push(clause);
+          queryParams[field] = updates[field];
+        }
       }
 
       const query = `
@@ -432,20 +338,15 @@ export class PersonRepository {
         return null;
       }
 
-      return this.nodeToPersonNode(result.records[0].get('p'));
-
-    } finally {
-      await session.close();
-    }
+      return nodeToPersonNode(result.records[0].get('p'));
+    });
   }
 
   /**
    * Add name variants to a person
    */
   async addNameVariants(personId: string, firstNames: string[], lastNames: string[]): Promise<void> {
-    const session = neo4jConnection.getSession();
-
-    try {
+    return withSession(async (session) => {
       const query = `
         MATCH (p:Person {personId: $personId})
         SET p.firstNames = [x IN (p.firstNames + $firstNames) | x],
@@ -453,16 +354,12 @@ export class PersonRepository {
             p.updatedAt = datetime()
       `;
 
-      // Remove duplicates in the arrays
       await session.run(query, {
         personId,
         firstNames: [...new Set(firstNames)],
         lastNames: [...new Set(lastNames)],
       });
-
-    } finally {
-      await session.close();
-    }
+    });
   }
 
   // ==========================================================================
@@ -473,9 +370,7 @@ export class PersonRepository {
    * Mark a person as merged (soft delete)
    */
   async markAsMerged(personId: string, mergedIntoId: string): Promise<void> {
-    const session = neo4jConnection.getSession();
-
-    try {
+    return withSession(async (session) => {
       const query = `
         MATCH (p:Person {personId: $personId})
         SET p.merged = true,
@@ -484,19 +379,14 @@ export class PersonRepository {
       `;
 
       await session.run(query, { personId, mergedIntoId });
-
-    } finally {
-      await session.close();
-    }
+    });
   }
 
   /**
    * Hard delete a person (use with caution)
    */
   async deletePerson(personId: string): Promise<boolean> {
-    const session = neo4jConnection.getSession();
-
-    try {
+    return withSession(async (session) => {
       const query = `
         MATCH (p:Person {personId: $personId})
         DETACH DELETE p
@@ -504,13 +394,8 @@ export class PersonRepository {
       `;
 
       const result = await session.run(query, { personId });
-      const deleted = result.records[0].get('deleted').toNumber();
-
-      return deleted > 0;
-
-    } finally {
-      await session.close();
-    }
+      return result.records[0].get('deleted').toNumber() > 0;
+    });
   }
 
   // ==========================================================================
@@ -521,9 +406,7 @@ export class PersonRepository {
    * Link a person to a source (create EXTRACTED_FROM relationship)
    */
   async linkToSource(personId: string, source: SourceExtraction): Promise<void> {
-    const session = neo4jConnection.getSession();
-
-    try {
+    return withSession(async (session) => {
       const query = `
         MATCH (p:Person {personId: $personId})
         MERGE (s:Source {sourceId: $sourceId})
@@ -557,19 +440,14 @@ export class PersonRepository {
         rawData: JSON.stringify(source.rawData),
         isPrimary: source.isPrimary,
       });
-
-    } finally {
-      await session.close();
-    }
+    });
   }
 
   /**
    * Get all sources for a person
    */
   async getPersonSources(personId: string): Promise<SourceExtraction[]> {
-    const session = neo4jConnection.getSession();
-
-    try {
+    return withSession(async (session) => {
       const query = `
         MATCH (p:Person {personId: $personId})-[r:EXTRACTED_FROM]->(s:Source)
         RETURN s, r
@@ -595,10 +473,7 @@ export class PersonRepository {
           rawData: s.rawData ? JSON.parse(s.rawData) : null,
         };
       });
-
-    } finally {
-      await session.close();
-    }
+    });
   }
 
   // ==========================================================================
@@ -614,9 +489,7 @@ export class PersonRepository {
     confidence: number,
     sourceIds: string[]
   ): Promise<void> {
-    const session = neo4jConnection.getSession();
-
-    try {
+    return withSession(async (session) => {
       const query = `
         MATCH (parent:Person {personId: $parentId})
         MATCH (child:Person {personId: $childId})
@@ -631,10 +504,7 @@ export class PersonRepository {
       `;
 
       await session.run(query, { parentId, childId, confidence, sourceIds });
-
-    } finally {
-      await session.close();
-    }
+    });
   }
 
   /**
@@ -646,9 +516,7 @@ export class PersonRepository {
     confidence: number,
     sourceIds: string[]
   ): Promise<void> {
-    const session = neo4jConnection.getSession();
-
-    try {
+    return withSession(async (session) => {
       const query = `
         MATCH (p1:Person {personId: $person1Id})
         MATCH (p2:Person {personId: $person2Id})
@@ -659,10 +527,7 @@ export class PersonRepository {
       `;
 
       await session.run(query, { person1Id, person2Id, confidence, sourceIds });
-
-    } finally {
-      await session.close();
-    }
+    });
   }
 
   /**
@@ -675,9 +540,7 @@ export class PersonRepository {
     confidence: number,
     sourceIds: string[]
   ): Promise<void> {
-    const session = neo4jConnection.getSession();
-
-    try {
+    return withSession(async (session) => {
       const query = `
         MATCH (s1:Person {personId: $spouse1Id})
         MATCH (s2:Person {personId: $spouse2Id})
@@ -694,105 +557,35 @@ export class PersonRepository {
         confidence,
         sourceIds,
       });
-
-    } finally {
-      await session.close();
-    }
+    });
   }
 
   /**
    * Get parents of a person
    */
   async getParents(personId: string): Promise<PersonRelation[]> {
-    const session = neo4jConnection.getSession();
-
-    try {
-      const query = `
-        MATCH (p:Person {personId: $personId})-[r:CHILD_OF]->(parent:Person)
-        WHERE parent.merged IS NULL OR parent.merged = false
-        RETURN parent, r
-      `;
-
-      const result = await session.run(query, { personId });
-
-      return result.records.map(record => ({
-        person: this.nodeToPersonNode(record.get('parent')),
-        relationship: 'CHILD_OF' as const,
-        confidence: record.get('r').properties.confidence || 0.8,
-        biological: record.get('r').properties.biological,
-        adoptive: record.get('r').properties.adoptive,
-        sourceIds: record.get('r').properties.sourceIds || [],
-      }));
-
-    } finally {
-      await session.close();
-    }
+    return this.getRelatedPersons(personId, 'CHILD_OF', 'parent', 'CHILD_OF');
   }
 
   /**
    * Get children of a person
    */
   async getChildren(personId: string): Promise<PersonRelation[]> {
-    const session = neo4jConnection.getSession();
-
-    try {
-      const query = `
-        MATCH (p:Person {personId: $personId})-[r:PARENT_OF]->(child:Person)
-        WHERE child.merged IS NULL OR child.merged = false
-        RETURN child, r
-      `;
-
-      const result = await session.run(query, { personId });
-
-      return result.records.map(record => ({
-        person: this.nodeToPersonNode(record.get('child')),
-        relationship: 'PARENT_OF' as const,
-        confidence: record.get('r').properties.confidence || 0.8,
-        biological: record.get('r').properties.biological,
-        adoptive: record.get('r').properties.adoptive,
-        birthOrder: record.get('r').properties.birthOrder,
-        sourceIds: record.get('r').properties.sourceIds || [],
-      }));
-
-    } finally {
-      await session.close();
-    }
+    return this.getRelatedPersons(personId, 'PARENT_OF', 'child', 'PARENT_OF');
   }
 
   /**
    * Get siblings of a person
    */
   async getSiblings(personId: string): Promise<PersonRelation[]> {
-    const session = neo4jConnection.getSession();
-
-    try {
-      const query = `
-        MATCH (p:Person {personId: $personId})-[r:SIBLING_OF]-(sibling:Person)
-        WHERE sibling.merged IS NULL OR sibling.merged = false
-        RETURN sibling, r
-      `;
-
-      const result = await session.run(query, { personId });
-
-      return result.records.map(record => ({
-        person: this.nodeToPersonNode(record.get('sibling')),
-        relationship: 'SIBLING_OF' as const,
-        confidence: record.get('r').properties.confidence || 0.8,
-        sourceIds: record.get('r').properties.sourceIds || [],
-      }));
-
-    } finally {
-      await session.close();
-    }
+    return this.getRelatedPersons(personId, 'SIBLING_OF', 'sibling', 'SIBLING_OF', true);
   }
 
   /**
    * Get spouses of a person
    */
   async getSpouses(personId: string): Promise<SpouseRelation[]> {
-    const session = neo4jConnection.getSession();
-
-    try {
+    return withSession(async (session) => {
       const query = `
         MATCH (p:Person {personId: $personId})-[r:SPOUSE_OF]-(spouse:Person)
         WHERE spouse.merged IS NULL OR spouse.merged = false
@@ -802,17 +595,46 @@ export class PersonRepository {
       const result = await session.run(query, { personId });
 
       return result.records.map(record => ({
-        person: this.nodeToPersonNode(record.get('spouse')),
+        person: nodeToPersonNode(record.get('spouse')),
         marriageDate: record.get('r').properties.marriageDate,
         marriagePlace: record.get('r').properties.marriagePlace,
         divorceDate: record.get('r').properties.divorceDate,
         confidence: record.get('r').properties.confidence || 0.8,
         sourceIds: record.get('r').properties.sourceIds || [],
       }));
+    });
+  }
 
-    } finally {
-      await session.close();
-    }
+  /**
+   * Generic helper to get related persons by relationship type
+   */
+  private async getRelatedPersons(
+    personId: string,
+    relationshipType: string,
+    targetAlias: string,
+    resultRelationship: 'CHILD_OF' | 'PARENT_OF' | 'SIBLING_OF',
+    bidirectional: boolean = false
+  ): Promise<PersonRelation[]> {
+    return withSession(async (session) => {
+      const direction = bidirectional ? '-' : '->';
+      const query = `
+        MATCH (p:Person {personId: $personId})-[r:${relationshipType}]${direction}(${targetAlias}:Person)
+        WHERE ${targetAlias}.merged IS NULL OR ${targetAlias}.merged = false
+        RETURN ${targetAlias}, r
+      `;
+
+      const result = await session.run(query, { personId });
+
+      return result.records.map(record => ({
+        person: nodeToPersonNode(record.get(targetAlias)),
+        relationship: resultRelationship,
+        confidence: record.get('r').properties.confidence || 0.8,
+        biological: record.get('r').properties.biological,
+        adoptive: record.get('r').properties.adoptive,
+        birthOrder: record.get('r').properties.birthOrder,
+        sourceIds: record.get('r').properties.sourceIds || [],
+      }));
+    });
   }
 
   // ==========================================================================
@@ -828,9 +650,7 @@ export class PersonRepository {
     confidence: number,
     matchedOn: string[]
   ): Promise<void> {
-    const session = neo4jConnection.getSession();
-
-    try {
+    return withSession(async (session) => {
       const query = `
         MATCH (p1:Person {personId: $personId1})
         MATCH (p2:Person {personId: $personId2})
@@ -842,10 +662,7 @@ export class PersonRepository {
       `;
 
       await session.run(query, { personId1, personId2, confidence, matchedOn });
-
-    } finally {
-      await session.close();
-    }
+    });
   }
 
   /**
@@ -857,9 +674,7 @@ export class PersonRepository {
     confidence: number,
     matchedOn: string[]
   ): Promise<void> {
-    const session = neo4jConnection.getSession();
-
-    try {
+    return withSession(async (session) => {
       const query = `
         MATCH (p1:Person {personId: $primaryId})
         MATCH (p2:Person {personId: $secondaryId})
@@ -871,42 +686,12 @@ export class PersonRepository {
       `;
 
       await session.run(query, { primaryId, secondaryId, confidence, matchedOn });
-
-    } finally {
-      await session.close();
-    }
+    });
   }
 
   // ==========================================================================
   // HELPER METHODS
   // ==========================================================================
-
-  /**
-   * Convert Neo4j node to PersonNode interface
-   */
-  private nodeToPersonNode(node: any): PersonNode {
-    const props = node.properties;
-
-    return {
-      personId: props.personId,
-      primaryName: props.primaryName,
-      firstNames: props.firstNames || [],
-      lastNames: props.lastNames || [],
-      hebrewFirstName: props.hebrewFirstName || undefined,
-      hebrewLastName: props.hebrewLastName || undefined,
-      birthDateText: props.birthDateText || undefined,
-      birthPlace: props.birthPlace || undefined,
-      deathDateText: props.deathDateText || undefined,
-      deathPlace: props.deathPlace || undefined,
-      sex: props.sex || undefined,
-      createdAt: props.createdAt ? new Date(props.createdAt) : new Date(),
-      updatedAt: props.updatedAt ? new Date(props.updatedAt) : new Date(),
-      confidence: typeof props.confidence === 'number' ? props.confidence : 0.7,
-      notes: props.notes || undefined,
-      merged: props.merged || false,
-      mergedInto: props.mergedInto || undefined,
-    };
-  }
 
   /**
    * Normalize sex value

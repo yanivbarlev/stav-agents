@@ -9,6 +9,7 @@ import { neo4jConnection } from '../neo4j-connection';
 import { PersonRepository, personRepository } from '../repositories/person.repository';
 import { PersonNode, Person, PersonUpdateInput } from '../models/person.model';
 import { MergeStrategy, MergeResult } from '../models/match.model';
+import { withSession } from '../utils/neo4j-utils';
 
 // ============================================================================
 // MERGE SERVICE CLASS
@@ -184,20 +185,16 @@ export class MergeService {
     source: 'primary' | 'secondary' | 'both' | 'none';
     conflict?: { field: string; value1: any; value2: any; reconcilable: boolean };
   } {
-    // If only one has a value, use it
+    // Handle cases where only one or neither has a value
     if (primaryValue && !secondaryValue) {
       return { value: primaryValue, source: 'primary' };
     }
-
     if (!primaryValue && secondaryValue) {
       return { value: secondaryValue, source: 'secondary' };
     }
-
     if (!primaryValue && !secondaryValue) {
       return { value: undefined, source: 'none' };
     }
-
-    // Both have values - check if they match
     if (this.valuesMatch(primaryValue, secondaryValue)) {
       return { value: primaryValue, source: 'both' };
     }
@@ -210,30 +207,29 @@ export class MergeService {
       reconcilable: true,
     };
 
+    const useSecondary = this.shouldPreferSecondary(strategy, primaryValue, secondaryValue);
+    return useSecondary
+      ? { value: secondaryValue, source: 'secondary', conflict }
+      : { value: primaryValue, source: 'primary', conflict };
+  }
+
+  /**
+   * Determine if secondary value should be preferred based on strategy
+   */
+  private shouldPreferSecondary(
+    strategy: MergeStrategy,
+    primaryValue: any,
+    secondaryValue: any
+  ): boolean {
     switch (strategy) {
-      case MergeStrategy.PREFER_PRIMARY:
-        return { value: primaryValue, source: 'primary', conflict };
-
       case MergeStrategy.PREFER_SECONDARY:
-        return { value: secondaryValue, source: 'secondary', conflict };
-
+        return true;
       case MergeStrategy.PREFER_COMPLETE:
-        // Prefer the longer/more complete value
-        const primary_len = String(primaryValue).length;
-        const secondary_len = String(secondaryValue).length;
-
-        if (primary_len >= secondary_len) {
-          return { value: primaryValue, source: 'primary', conflict };
-        } else {
-          return { value: secondaryValue, source: 'secondary', conflict };
-        }
-
+        return String(secondaryValue).length > String(primaryValue).length;
+      case MergeStrategy.PREFER_PRIMARY:
       case MergeStrategy.PREFER_RELIABLE:
-        // For now, prefer primary (would need source reliability info)
-        return { value: primaryValue, source: 'primary', conflict };
-
       default:
-        return { value: primaryValue, source: 'primary', conflict };
+        return false;
     }
   }
 
@@ -262,56 +258,43 @@ export class MergeService {
     primaryId: string,
     secondaryId: string
   ): Promise<void> {
-    const session = neo4jConnection.getSession();
+    return withSession(async (session) => {
+      const relationshipTransfers = [
+        // PARENT_OF relationships
+        `MATCH (secondary:Person {personId: $secondaryId})-[r:PARENT_OF]->(child:Person)
+         MATCH (primary:Person {personId: $primaryId})
+         MERGE (primary)-[newRel:PARENT_OF]->(child)
+         SET newRel = r
+         DELETE r`,
+        // CHILD_OF relationships
+        `MATCH (secondary:Person {personId: $secondaryId})-[r:CHILD_OF]->(parent:Person)
+         MATCH (primary:Person {personId: $primaryId})
+         MERGE (primary)-[newRel:CHILD_OF]->(parent)
+         SET newRel = r
+         DELETE r`,
+        // SIBLING_OF relationships
+        `MATCH (secondary:Person {personId: $secondaryId})-[r:SIBLING_OF]-(sibling:Person)
+         WHERE sibling.personId <> $primaryId
+         MATCH (primary:Person {personId: $primaryId})
+         MERGE (primary)-[newRel:SIBLING_OF]-(sibling)
+         SET newRel = r
+         DELETE r`,
+        // SPOUSE_OF relationships
+        `MATCH (secondary:Person {personId: $secondaryId})-[r:SPOUSE_OF]-(spouse:Person)
+         WHERE spouse.personId <> $primaryId
+         MATCH (primary:Person {personId: $primaryId})
+         MERGE (primary)-[newRel:SPOUSE_OF]-(spouse)
+         SET newRel = r
+         DELETE r`,
+        // Remove self-referential relationships
+        `MATCH (p:Person {personId: $primaryId})-[r]->(p)
+         DELETE r`,
+      ];
 
-    try {
-      // Transfer PARENT_OF relationships
-      await session.run(`
-        MATCH (secondary:Person {personId: $secondaryId})-[r:PARENT_OF]->(child:Person)
-        MATCH (primary:Person {personId: $primaryId})
-        MERGE (primary)-[newRel:PARENT_OF]->(child)
-        SET newRel = r
-        DELETE r
-      `, { primaryId, secondaryId });
-
-      // Transfer CHILD_OF relationships
-      await session.run(`
-        MATCH (secondary:Person {personId: $secondaryId})-[r:CHILD_OF]->(parent:Person)
-        MATCH (primary:Person {personId: $primaryId})
-        MERGE (primary)-[newRel:CHILD_OF]->(parent)
-        SET newRel = r
-        DELETE r
-      `, { primaryId, secondaryId });
-
-      // Transfer SIBLING_OF relationships
-      await session.run(`
-        MATCH (secondary:Person {personId: $secondaryId})-[r:SIBLING_OF]-(sibling:Person)
-        WHERE sibling.personId <> $primaryId
-        MATCH (primary:Person {personId: $primaryId})
-        MERGE (primary)-[newRel:SIBLING_OF]-(sibling)
-        SET newRel = r
-        DELETE r
-      `, { primaryId, secondaryId });
-
-      // Transfer SPOUSE_OF relationships
-      await session.run(`
-        MATCH (secondary:Person {personId: $secondaryId})-[r:SPOUSE_OF]-(spouse:Person)
-        WHERE spouse.personId <> $primaryId
-        MATCH (primary:Person {personId: $primaryId})
-        MERGE (primary)-[newRel:SPOUSE_OF]-(spouse)
-        SET newRel = r
-        DELETE r
-      `, { primaryId, secondaryId });
-
-      // Remove any self-referential relationships
-      await session.run(`
-        MATCH (p:Person {personId: $primaryId})-[r]->(p)
-        DELETE r
-      `, { primaryId });
-
-    } finally {
-      await session.close();
-    }
+      for (const query of relationshipTransfers) {
+        await session.run(query, { primaryId, secondaryId });
+      }
+    });
   }
 
   /**
@@ -321,9 +304,7 @@ export class MergeService {
     primaryId: string,
     secondaryId: string
   ): Promise<void> {
-    const session = neo4jConnection.getSession();
-
-    try {
+    return withSession(async (session) => {
       await session.run(`
         MATCH (secondary:Person {personId: $secondaryId})-[r:EXTRACTED_FROM]->(source:Source)
         MATCH (primary:Person {personId: $primaryId})
@@ -333,10 +314,7 @@ export class MergeService {
             newRel.isPrimary = false
         DELETE r
       `, { primaryId, secondaryId });
-
-    } finally {
-      await session.close();
-    }
+    });
   }
 }
 
