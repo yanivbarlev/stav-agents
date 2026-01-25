@@ -150,6 +150,27 @@ export class BackendAPI {
   }
 
   /**
+   * Analyze person details using AI
+   * @param {string} personName - Full name of the person
+   * @param {string} rawPageText - Raw text content from the page
+   * @param {string} source - Source name (FamilySearch, MyHeritage, Ancestry)
+   * @returns {Promise<Object|null>} AI analysis results or null on failure
+   */
+  async analyzePersonDetails(personName, rawPageText, source) {
+    try {
+      const result = await this._post('/api/analyze-person', {
+        personName,
+        rawPageText,
+        source
+      });
+      return result.analysis || null;
+    } catch (error) {
+      console.error('[BackendAPI] Failed to analyze person details:', error);
+      return null;
+    }
+  }
+
+  /**
    * Generic GET request
    * @private
    * @param {string} endpoint - API endpoint
